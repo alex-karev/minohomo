@@ -1,7 +1,10 @@
 # minohomo settings. Existing files are never overwritten by init.
-output: /etc/mihomo/config.yaml
+# Relative to the minohomo config directory.
+output: current.yaml
 mihomo-binary: /usr/bin/mihomo
-reload-command: [systemctl, reload, mihomo.service]
+# Empty means: sudo minohomo apply --config <output>, then restart mihomo.service.
+# Nonempty overrides deployment with a custom command, run as your current user.
+reload-command: []
 request-timeout-seconds: 45
 # Change this URL to use another geosite database or mirror.
 # minohomo geosite update --url URL overrides it for one download.

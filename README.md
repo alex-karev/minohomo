@@ -1,16 +1,17 @@
 # Minohomo
 
-A root-only Rust CLI that imports proxy subscriptions and direct proxy links into Mihomo. It merges proxies, applies your local routing policy, validates the generated config, and reloads the existing Mihomo service.
+A Rust CLI that imports proxy subscriptions and direct proxy links into Mihomo. It merges proxies, applies your local routing policy, validates the generated config, and uses sudo to install the result for the system Mihomo service.
 
-Subscription updates are manual. No additional daemon, timer, or systemd service is required.
+Subscription updates are manual. Mihomo runs independently as the system service `mihomo.service`. minohomo does not provide a daemon or systemd unit.
 
 ## Installation
 
-Requires an installed Mihomo binary with gVisor support. Defaults target the Debian service:
+Requires an installed Mihomo binary with gVisor support. Defaults keep source files per-user and deploy the generated config to the system service:
 
 - Binary: `/usr/bin/mihomo`
-- Generated config: `/etc/mihomo/config.yaml`
-- Reload command: `systemctl reload mihomo.service`
+- Local generated config: `~/.config/minohomo/current.yaml`
+- Installed config: `/etc/mihomo/config.yaml`
+- Apply: `sudo minohomo apply --config <current.yaml>`, then `systemctl restart mihomo.service`
 
 ### Debian package
 
@@ -21,7 +22,7 @@ Download the `.deb` for your architecture from GitHub Releases or the **Debian p
 sudo apt install ./minohomo_*_amd64.deb
 ```
 
-The package installs `/usr/bin/minohomo`, documentation, and config templates. It does not install Mihomo, create `/etc/minohomo`, modify your active config, or start services. If you previously installed `/usr/local/bin/minohomo` manually, remove or replace that copy so it does not shadow the packaged binary.
+The package installs `/usr/bin/minohomo`, documentation, and config templates. It does not install Mihomo, create user config files, modify your active config, or enable/start services. If you previously installed `/usr/local/bin/minohomo` manually, remove or replace that copy so it does not shadow the packaged binary.
 
 ### From source
 
@@ -34,20 +35,35 @@ sudo install -m 755 target/release/minohomo /usr/local/bin/minohomo
 
 ### Initial setup
 
-```sh
-sudo minohomo init
-sudo minohomo add 'https://subscription.example/profile'
-sudo minohomo geosite update --no-reload
-sudo minohomo update
-```
-
-If Mihomo is inactive, the reload fails but the generated config and source cache remain saved. Start the existing service:
+Run minohomo as your regular user:
 
 ```sh
-sudo systemctl start mihomo.service
+minohomo init
+minohomo add 'https://subscription.example/profile'
+minohomo geosite update --no-reload
+minohomo update
 ```
 
-minohomo does not install or enable system services. Help and version work without root; all application commands require root.
+`update` fetches sources and validates the generated config as your user. It saves `~/.config/minohomo/current.yaml`, then invokes the same minohomo executable through `sudo` with the `apply` subcommand. Expect a sudo password prompt. The helper validates a snapshot with `/usr/bin/mihomo`, installs it as `/etc/mihomo/config.yaml`, copies the local geosite database when available, and restarts `mihomo.service` using `/usr/bin/systemctl`.
+
+Mihomo must already be installed with a system service that reads `/etc/mihomo/config.yaml` and uses `/etc/mihomo` as its data directory. TUN privileges belong to that service. minohomo itself needs neither root nor binary capabilities for its normal commands. The package depends on `sudo`; it does not install sudoers rules or enable/start services during installation.
+
+After editing local settings or rules, regenerate from cached proxies without refreshing subscriptions:
+
+```sh
+minohomo update --no-sync
+```
+
+This still validates, installs, and restarts Mihomo. It does not fetch subscription URLs or reparse direct sources, and it preserves source timestamps and cached proxies. Sources without cached proxies contribute no nodes. At least one cached proxy is required. Validation may still download missing geodata or rule-provider data; `--no-sync` means no subscription syncing, not guaranteed offline execution.
+
+To retry only deployment of an existing generated file:
+
+```sh
+sudo minohomo apply --config "$HOME/.config/minohomo/current.yaml" \
+  --geosite "$HOME/.config/minohomo/GeoSite.dat"
+```
+
+Omit `--geosite` to preserve the system database. The helper accepts only config/database input paths; its destination, validator binary, and service name are fixed. It does not read user settings as root. Applying a user-provided Mihomo config is still a privileged operation: use normal sudo authorization, not a restricted passwordless sudoers rule that assumes this is safe for untrusted users.
 
 ## Commands
 
@@ -57,9 +73,10 @@ minohomo add <LINK>...
 minohomo add --proxy <HTTP_OR_HTTPS_PROXY_LINK>...
 minohomo list
 minohomo delete <INDEX>
-minohomo update [all|_|INDEX]
+minohomo update [all|_|INDEX] [--no-sync]
 minohomo geosite status
 minohomo geosite update [--url URL] [--no-reload]
+sudo minohomo apply --config PATH [--geosite PATH]
 ```
 
 | Command | Behavior |
@@ -68,22 +85,24 @@ minohomo geosite update [--url URL] [--no-reload]
 | `add` | Validates and saves links. Does not fetch subscriptions or reload Mihomo. HTTP(S) URLs mean subscriptions unless `--proxy` is supplied. |
 | `list` | Shows one-based indexes, links, last successful update times in UTC, and cached proxy counts. |
 | `delete INDEX` | Removes a source and its cache. Run `update` to apply the removal. Indexes shift after deletion. |
-| `update`, `update all`, `update _` | Refreshes all sources, generates and validates the merged config, then reloads Mihomo. |
+| `update`, `update all`, `update _` | Refreshes all sources, generates and validates the merged config, then installs it through sudo and restarts Mihomo. |
 | `update INDEX` | Refreshes one source and regenerates using cached proxies from all other sources. Never-updated sources are omitted with a message. |
+| `update --no-sync` | Regenerates from cached proxies, validates, installs, and restarts without fetching sources. Cannot be combined with a source index. |
+| `apply --config PATH [--geosite PATH]` | Root-only installer used by `update`. Validates, installs to `/etc/mihomo`, and restarts the system service. |
 
 Examples:
 
 ```sh
-sudo minohomo add 'vless://UUID@server.example:443?security=tls&sni=server.example#MyNode'
-sudo minohomo add 'socks5://user:password@server.example:1080#Upstream'
-sudo minohomo add --proxy 'https://user:password@server.example:443#HTTPSProxy'
-sudo minohomo list
-sudo minohomo update 2
-sudo minohomo delete 1
-sudo minohomo update
+minohomo add 'vless://UUID@server.example:443?security=tls&sni=server.example#MyNode'
+minohomo add 'socks5://user:password@server.example:1080#Upstream'
+minohomo add --proxy 'https://user:password@server.example:443#HTTPSProxy'
+minohomo list
+minohomo update 2
+minohomo delete 1
+minohomo update
 ```
 
-A fetch, parse, or validation failure leaves the existing config and saved source state unchanged. A reload failure leaves the newly generated config and cache saved, and reports an error. Updates save the previous generated config as `config.yaml.bak`.
+A fetch, parse, or local validation failure leaves the local generated config and saved source state unchanged. A sudo, install, system validation, or restart failure leaves the newly generated local config and cache saved so deployment can be retried. System validation failure leaves the installed config and database unchanged. Updates save the previous local config as `current.yaml.bak`; the helper saves system config/database backups before replacement. A restart failure leaves the new system config installed and reports an error.
 
 Deleting the last source does not stop Mihomo or replace its active config with DIRECT. Add and update another source before regeneration.
 
@@ -95,20 +114,22 @@ Edit the source files, not the generated Mihomo config:
 
 | Path | Purpose |
 | --- | --- |
-| `/etc/minohomo/config.yaml` | Output path, binary, reload command, request timeout, geosite URL, proxy overrides, and base Mihomo settings |
-| `/etc/minohomo/rules.yaml` | Complete routing policy and optional rule providers |
-| `/etc/minohomo/sources.yaml` | Saved links, stable source IDs, timestamps, and cached proxies |
-| `/etc/mihomo/config.yaml` | Generated config, read by the Mihomo daemon |
-| `/etc/mihomo/GeoSite.dat` | Installed geosite database |
+| `~/.config/minohomo/config.yaml` | Output path, binary, reload command, request timeout, geosite URL, proxy overrides, and base Mihomo settings |
+| `~/.config/minohomo/rules.yaml` | Complete routing policy and optional rule providers |
+| `~/.config/minohomo/sources.yaml` | Saved links, stable source IDs, timestamps, and cached proxies |
+| `~/.config/minohomo/current.yaml` | Local generated config, passed to the privileged installer |
+| `/etc/mihomo/config.yaml` | Installed config, read by the system Mihomo daemon |
+| `~/.config/minohomo/GeoSite.dat` | Local geosite database, copied by the privileged installer |
+| `/etc/mihomo/GeoSite.dat` | Installed system geosite database |
 
 The config directory is mode `0700`; files created by minohomo are mode `0600`. Source caches and backups contain credentials. The Mihomo daemon must have permission to read them.
 
-Use `--config-dir /absolute/path` to change minohomo's directory. Change `output` in its `config.yaml` to select another generated config path. The geosite database follows the output directory. Keep the daemon's data directory and config path aligned with these settings.
+The default directory is `$HOME/.config/minohomo`. Use `--config-dir /absolute/path` to change it. `output: current.yaml` resolves relative to that directory; absolute local output paths are also supported. The local geosite database follows the output directory. The built-in installer always targets `/etc/mihomo/config.yaml` and `mihomo.service`; use a custom `reload-command` for a different deployment. `mihomo-binary` controls local validation only; privileged validation always uses `/usr/bin/mihomo`.
 
 ### Base settings and proxy overrides
 
 ```sh
-sudoedit /etc/minohomo/config.yaml
+editor ~/.config/minohomo/config.yaml
 ```
 
 - `mihomo` holds listener, TUN, DNS, sniffer, and proxy-group settings.
@@ -116,13 +137,13 @@ sudoedit /etc/minohomo/config.yaml
 - The `PROXY` selector uses `include-all: true` to include imported nodes. You can define additional groups for custom rules.
 - Generation replaces `proxies`, `rules`, `rule-providers`, and `geox-url.geosite`, and removes `proxy-providers`.
 
-Existing config files are never overwritten by `init` or a binary upgrade. See [defaults/config.yaml](defaults/config.yaml) for the current template. After editing settings, run `sudo minohomo update` to regenerate and reload. Config edits do not require a binary reinstall.
+Existing config files are never overwritten by `init` or a binary upgrade. See [defaults/config.yaml](defaults/config.yaml) for the current template. After editing settings, run `minohomo update` to regenerate and apply. Config edits do not require a binary reinstall.
 
 ### Routing rules
 
 ```sh
-sudoedit /etc/minohomo/rules.yaml
-sudo minohomo update
+editor ~/.config/minohomo/rules.yaml
+minohomo update
 ```
 
 Example structure:
@@ -162,7 +183,7 @@ curl --proxy socks5h://127.0.0.1:7897 https://example.com
 
 Mihomo remembers the selected node. Without a saved selection, the selector uses its default choice. It does not automatically fail over.
 
-The API listens on `127.0.0.1:9090`. `init` generates a random secret stored as `mihomo.secret` in `/etc/minohomo/config.yaml`. Use a compatible dashboard or the API:
+The API listens on `127.0.0.1:9090`. `init` generates a random secret stored as `mihomo.secret` in `~/.config/minohomo/config.yaml`. Use a compatible dashboard or the API:
 
 ```sh
 curl -H 'Authorization: Bearer YOUR_SECRET' \
@@ -179,12 +200,12 @@ Imported names have a stable source prefix, such as `s1: MyNode`. Duplicate name
 ## Geosite database
 
 ```sh
-sudo minohomo geosite status
-sudo minohomo geosite update
-sudo minohomo geosite update --url 'https://mirror.example/geosite.dat'
+minohomo geosite status
+minohomo geosite update
+minohomo geosite update --url 'https://mirror.example/geosite.dat'
 ```
 
-Set a permanent source in `/etc/minohomo/config.yaml`:
+Set a permanent source in `~/.config/minohomo/config.yaml`:
 
 ```yaml
 geosite-url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat
@@ -194,7 +215,7 @@ This also sets the generated config's `geox-url.geosite`. `--url` overrides it f
 
 `status` reports the configured URL, file path, size, modification time, category count, and domain entry count. Modification time is not the publisher's release date.
 
-`geosite update` downloads at most 64 MiB, checks the protobuf format, and validates required rule and DNS categories with Mihomo. Invalid data leaves the installed file untouched. A successful update saves `GeoSite.dat.bak`, replaces the database atomically, and reloads Mihomo. A failed reload leaves the new database installed and reports an error.
+`geosite update` downloads at most 64 MiB, checks the protobuf format, and validates required rule and DNS categories with Mihomo. Invalid data leaves the installed file untouched. A successful update saves `GeoSite.dat.bak`, replaces the database atomically, and applies the existing local `current.yaml` plus the new database through sudo, restarting the system service. Run `minohomo update` first if no local config exists, or use `--no-reload` and deploy with the next update. A failed apply leaves the local database saved for retry.
 
 Use `--no-reload` before the first daemon start or to defer reloading. This command does not refresh subscriptions or regenerate the main config.
 
@@ -212,7 +233,7 @@ Clash YAML subscriptions, XHTTP, and arbitrary plugin formats are not supported.
 
 REALITY imports preserve `support-x25519mlkem768` when supplied. Mihomo has no SpiderX field, so Xray's `spx` is not mapped to a YAML option. Fingerprint behavior can differ between cores; edit `proxy-overrides` if needed.
 
-Subscription requests use `V2rayNG/1.8.12` as the User-Agent for compatibility with 3x-ui. HTTP downloads verify certificates, enforce timeouts, follow at most five redirects, and limit subscriptions to 16 MiB. Proxy environment variables apply when present in the root process; `sudo` may strip them.
+Subscription requests use `V2rayNG/1.8.12` as the User-Agent for compatibility with 3x-ui. HTTP downloads verify certificates, enforce timeouts, follow at most five redirects, and limit subscriptions to 16 MiB. Proxy environment variables apply when present in the current process.
 
 ## Troubleshooting
 
@@ -239,7 +260,7 @@ ip route show table all
 - **REALITY authentication fails:** verify the public key, short ID, SNI, fingerprint, and ML-KEM flag against the same source link.
 - **Listener fails to bind:** stop other clients using the same port or change `mihomo.mixed-port`.
 
-Make fixes in `/etc/minohomo/config.yaml` or `rules.yaml`, then regenerate. Editing only the generated file loses changes on the next update.
+Make fixes in `~/.config/minohomo/config.yaml` or `rules.yaml`, then regenerate. Editing only the generated file loses changes on the next update.
 
 ## Debian builds and releases
 
@@ -251,7 +272,7 @@ cargo install cargo-deb --version '=3.7.0' --locked
 cargo deb --locked
 ```
 
-Packages are written to `target/debian/`. Configuration stays under CLI control; no maintainer scripts or systemd units are included.
+Packages are written to `target/debian/`. Configuration stays under CLI control. No systemd units or maintainer scripts are included.
 
 ## Development
 
@@ -268,13 +289,13 @@ MINOHOMO_TEST_GEOSITE=/path/to/GeoSite.dat \
   cargo test --locked real_database_passes_mihomo_validation_and_replacement -- --ignored --nocapture
 ```
 
-Tests require neither root nor a running daemon. Root enforcement applies to the CLI entry point.
+Tests require neither root nor a running daemon.
 
 ## AI Disclosure
 
 This program is vibecoded. I provided a lot of guidance for AI agent on how the program should function and the result is pretty much exactly what I wanted.
 
-In theory it should be safe to use, because its only task is to store your proxies and generate /etc/mihomo/config.yaml. Nothing is running in the background aside from mihomo service that user should install as a prerequisite. However, I did NOT read any code, so no warranty.
+In theory it should be safe to use, because its only task is to store your proxies and generate ~/.config/minohomo/current.yaml. Nothing is running in the background aside from the system Mihomo service that the user must install as a prerequisite. However, I did NOT read any code, so no warranty.
 
 ## License
 

@@ -1,10 +1,11 @@
+mod apply;
 mod geosite;
 #[cfg(test)]
 mod integration_tests;
 mod links;
 mod storage;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
@@ -25,12 +26,12 @@ const MAX_BODY: u64 = 16 * 1024 * 1024;
 #[command(
     name = "minohomo",
     version,
-    about = "Manage proxy sources and regenerate Mihomo config. Run as root."
+    about = "Manage proxy sources and regenerate Mihomo config."
 )]
 struct Cli {
     /// Directory containing settings, routing rules, and saved sources
-    #[arg(long, global = true, default_value = "/etc/minohomo")]
-    config_dir: PathBuf,
+    #[arg(long, global = true)]
+    config_dir: Option<PathBuf>,
     #[command(subcommand)]
     command: Action,
 }
@@ -55,11 +56,23 @@ enum Action {
     List,
     /// Remove a source and its cache; run update afterward to apply to Mihomo
     Delete { index: usize },
-    /// Fetch sources, regenerate config, validate it, and reload Mihomo
+    /// Install a generated config into /etc/mihomo and restart the system service (root)
+    Apply {
+        /// Generated Mihomo config to install
+        #[arg(long)]
+        config: PathBuf,
+        /// Optional local geosite database to install alongside the config
+        #[arg(long)]
+        geosite: Option<PathBuf>,
+    },
+    /// Fetch sources, regenerate config, validate it, and apply it through sudo
     Update {
         /// all, _, or a one-based source index; omitted means all
         #[arg(default_value="all", value_parser=parse_target)]
         target: Target,
+        /// Regenerate from cached proxies without fetching any sources
+        #[arg(long)]
+        no_sync: bool,
     },
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,11 +93,6 @@ fn parse_target(s: &str) -> std::result::Result<Target, String> {
 }
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    // Help and version work without root. All application commands require root.
-    if unsafe { libc::geteuid() } != 0 {
-        eprintln!("error: minohomo must run as root; use sudo minohomo ...");
-        return ExitCode::FAILURE;
-    }
     // Source caches and generated configs contain authentication secrets.
     unsafe {
         libc::umask(0o077);
@@ -97,14 +105,31 @@ fn main() -> ExitCode {
         }
     }
 }
+fn default_config_dir() -> Result<PathBuf> {
+    let home =
+        std::env::var_os("HOME").context("HOME is not set; use --config-dir /absolute/path")?;
+    config_dir_for_home(std::path::Path::new(&home))
+}
+fn config_dir_for_home(home: &std::path::Path) -> Result<PathBuf> {
+    ensure!(
+        home.is_absolute(),
+        "HOME must be an absolute path; use --config-dir /absolute/path"
+    );
+    Ok(home.join(".config/minohomo"))
+}
 fn run(cli: Cli) -> Result<()> {
-    let store = Store::open(&cli.config_dir)?;
+    // The privileged installer never loads user settings or initializes root's config.
+    if let Action::Apply { config, geosite } = &cli.command {
+        return apply::run(config, geosite.as_deref());
+    }
+    let config_dir = cli.config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
+    let store = Store::open(&config_dir)?;
     if let Action::Geosite { command } = &cli.command {
         return geosite::run(&store, command);
     }
     let mut state = store.state()?;
     match cli.command {
-        Action::Geosite { .. } => unreachable!(),
+        Action::Geosite { .. } | Action::Apply { .. } => unreachable!(),
         Action::Init => println!("Config files ready in {}", store.root.display()),
         Action::List => {
             if state.sources.is_empty() {
@@ -170,7 +195,7 @@ fn run(cli: Cli) -> Result<()> {
                 );
             }
         }
-        Action::Update { target } => update(&store, &mut state, target)?,
+        Action::Update { target, no_sync } => update(&store, &mut state, target, no_sync)?,
     }
     Ok(())
 }
@@ -281,10 +306,14 @@ fn generate(settings: &Settings, policy: &Policy, state: &State) -> Result<Value
     }
     Ok(Value::Mapping(out))
 }
-fn update(store: &Store, state: &mut State, target: Target) -> Result<()> {
+fn update(store: &Store, state: &mut State, target: Target, no_sync: bool) -> Result<()> {
     ensure!(
         !state.sources.is_empty(),
         "no sources saved; use minohomo add first"
+    );
+    ensure!(
+        !no_sync || target == Target::All,
+        "--no-sync cannot be combined with a source index"
     );
     if let Target::Index(index) = target {
         ensure!(
@@ -294,11 +323,15 @@ fn update(store: &Store, state: &mut State, target: Target) -> Result<()> {
     }
     let settings = store.settings()?;
     let policy = store.policy()?;
-    let client = http_client(&settings)?;
+    let client = if no_sync {
+        None
+    } else {
+        Some(http_client(&settings)?)
+    };
     for (i, source) in state.sources.iter_mut().enumerate() {
-        if target == Target::All || target == Target::Index(i + 1) {
+        if !no_sync && (target == Target::All || target == Target::Index(i + 1)) {
             println!("Updating source {}...", i + 1);
-            source.proxies = fetch(&client, source).with_context(|| {
+            source.proxies = fetch(client.as_ref().unwrap(), source).with_context(|| {
                 format!(
                     "source {} update failed; no config or source state was changed",
                     i + 1
@@ -315,7 +348,9 @@ fn update(store: &Store, state: &mut State, target: Target) -> Result<()> {
     }
     let config = generate(&settings, &policy, state)?;
     let body = format!(
-        "# Generated by minohomo. Edit /etc/minohomo/config.yaml and rules.yaml instead.\n{}",
+        "# Generated by minohomo. Edit {} and {} instead.\n{}",
+        store.root.join("config.yaml").display(),
+        store.root.join("rules.yaml").display(),
         serde_yaml::to_string(&config)?
     );
     let candidate = staged_file(&settings.output, body.as_bytes())?;
@@ -341,7 +376,7 @@ fn update(store: &Store, state: &mut State, target: Target) -> Result<()> {
         &store.root.join("sources.yaml"),
         serde_yaml::to_string(state)?.as_bytes(),
     )?;
-    // Preserve the previous config, including its credentials, as a root-only backup.
+    // Preserve the previous config, including its credentials, as an owner-only backup.
     if settings.output.exists() {
         let old = std::fs::read(&settings.output)?;
         storage::atomic_write(&settings.output.with_extension("yaml.bak"), &old)?;
@@ -359,19 +394,39 @@ fn http_client(settings: &Settings) -> Result<Client> {
         .build()?)
 }
 fn reload(settings: &Settings, saved: &str) -> Result<()> {
-    let command = &settings.reload_command;
-    let status = Command::new(&command[0])
-        .args(&command[1..])
-        .status()
-        .with_context(|| {
-            format!("{saved} saved, but reload command could not run; reload Mihomo manually")
-        })?;
-    if !status.success() {
-        bail!(
-            "{saved} saved, but Mihomo reload failed; check 'systemctl status mihomo.service'. If inactive, start it with 'systemctl start mihomo.service'"
-        );
-    }
-    println!("Mihomo reload command succeeded.");
+    let mut command = if let Some(program) = settings.reload_command.first() {
+        // Explicit custom deployment command, retained for existing installations.
+        let mut command = Command::new(program);
+        command.args(&settings.reload_command[1..]);
+        command
+    } else {
+        let executable = std::env::current_exe().context("cannot locate minohomo executable")?;
+        let mut command = if unsafe { libc::geteuid() } == 0 {
+            Command::new(executable)
+        } else {
+            let mut command = Command::new("sudo");
+            command.arg("--").arg(executable);
+            command
+        };
+        command.arg("apply").arg("--config").arg(&settings.output);
+        let database = settings
+            .output
+            .parent()
+            .context("output has no directory")?
+            .join("GeoSite.dat");
+        if database.exists() {
+            command.arg("--geosite").arg(database);
+        }
+        command
+    };
+    let status = command.status().with_context(|| {
+        format!("{saved} saved locally, but apply command could not run; retry with 'minohomo update --no-sync'")
+    })?;
+    ensure!(
+        status.success(),
+        "{saved} saved locally, but apply/reload failed; retry with 'minohomo update --no-sync' and check 'systemctl status mihomo.service'"
+    );
+    println!("Mihomo apply command succeeded.");
     Ok(())
 }
 
@@ -382,6 +437,27 @@ mod tests {
     #[test]
     fn clap_definition() {
         Cli::command().debug_assert();
+    }
+    #[test]
+    fn user_config_directory() {
+        assert_eq!(
+            config_dir_for_home(std::path::Path::new("/home/test")).unwrap(),
+            PathBuf::from("/home/test/.config/minohomo")
+        );
+        assert!(config_dir_for_home(std::path::Path::new("")).is_err());
+        assert!(config_dir_for_home(std::path::Path::new("relative")).is_err());
+        assert!(
+            Cli::try_parse_from(["minohomo", "init"])
+                .unwrap()
+                .config_dir
+                .is_none()
+        );
+        assert_eq!(
+            Cli::try_parse_from(["minohomo", "--config-dir", "/custom", "init"])
+                .unwrap()
+                .config_dir,
+            Some(PathBuf::from("/custom"))
+        );
     }
     #[test]
     fn geosite_syntax() {
@@ -402,12 +478,28 @@ mod tests {
         assert!(Cli::try_parse_from(["minohomo", "geosite", "wrong"]).is_err());
     }
     #[test]
+    fn apply_syntax() {
+        assert!(
+            Cli::try_parse_from([
+                "minohomo",
+                "apply",
+                "--config",
+                "/tmp/current.yaml",
+                "--geosite",
+                "/tmp/GeoSite.dat"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["minohomo", "apply"]).is_err());
+    }
+    #[test]
     fn update_syntax() {
         for argv in [
             vec!["minohomo", "update"],
             vec!["minohomo", "update", "all"],
             vec!["minohomo", "update", "_"],
             vec!["minohomo", "update", "2"],
+            vec!["minohomo", "update", "--no-sync"],
         ] {
             assert!(Cli::try_parse_from(argv).is_ok());
         }

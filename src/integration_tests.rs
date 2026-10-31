@@ -45,7 +45,7 @@ fn targeted_update_reuses_other_caches_and_backs_up_output() {
     store.save(&state).unwrap();
     fs::create_dir_all(output.parent().unwrap()).unwrap();
     fs::write(&output, "old config").unwrap();
-    update(&store, &mut state, Target::Index(1)).unwrap();
+    update(&store, &mut state, Target::Index(1), false).unwrap();
     let saved = store.state().unwrap();
     assert!(saved.sources[0].updated_at.is_some());
     assert_eq!(saved.sources[1].updated_at, old_timestamp);
@@ -67,7 +67,7 @@ fn update_preserves_reality_mlkem_while_applying_fingerprint_override() {
         sources: vec![source],
     };
     store.save(&state).unwrap();
-    update(&store, &mut state, Target::All).unwrap();
+    update(&store, &mut state, Target::All, false).unwrap();
     let generated: Value = storage::read_yaml(&output).unwrap();
     assert_eq!(generated["proxies"][0]["client-fingerprint"], "chrome");
     assert_eq!(
@@ -92,7 +92,7 @@ fn rejected_config_leaves_saved_state_and_output_untouched() {
     store.save(&state).unwrap();
     fs::create_dir_all(output.parent().unwrap()).unwrap();
     fs::write(&output, "original").unwrap();
-    assert!(update(&store, &mut state, Target::All).is_err());
+    assert!(update(&store, &mut state, Target::All, false).is_err());
     assert_eq!(fs::read_to_string(&output).unwrap(), "original");
     assert!(store.state().unwrap().sources[0].updated_at.is_none());
 }
@@ -109,8 +109,8 @@ fn failed_reload_keeps_new_config_and_cache() {
         sources: vec![direct(1, "Fresh")],
     };
     store.save(&state).unwrap();
-    let err = update(&store, &mut state, Target::All).unwrap_err();
-    assert!(err.to_string().contains("reload failed"));
+    let err = update(&store, &mut state, Target::All, false).unwrap_err();
+    assert!(err.to_string().contains("apply/reload failed"));
     assert!(output.exists());
     assert!(store.state().unwrap().sources[0].updated_at.is_some());
 }
@@ -125,7 +125,7 @@ fn failed_fetch_does_not_commit_earlier_successes() {
         sources: vec![direct(1, "Fresh"), broken],
     };
     store.save(&state).unwrap();
-    assert!(update(&store, &mut state, Target::All).is_err());
+    assert!(update(&store, &mut state, Target::All, false).is_err());
     assert!(!output.exists());
     assert!(
         store
@@ -135,4 +135,39 @@ fn failed_fetch_does_not_commit_earlier_successes() {
             .iter()
             .all(|s| s.updated_at.is_none())
     );
+}
+
+#[test]
+fn no_sync_regenerates_policy_without_fetching_or_changing_cache() {
+    let (_temp, store, output) = setup();
+    let mut source = direct(1, "Cached");
+    source.proxies = vec![links::parse_link(&source.link).unwrap()];
+    source.link = "http://127.0.0.1:1/must-not-be-fetched".into();
+    source.kind = SourceKind::Subscription;
+    source.updated_at = Some(Utc::now() - chrono::Duration::days(1));
+    let mut state = State {
+        next_id: 1,
+        sources: vec![source],
+    };
+    store.save(&state).unwrap();
+    let before = fs::read(store.root.join("sources.yaml")).unwrap();
+    fs::write(store.root.join("rules.yaml"), "rules:\n  - MATCH,DIRECT\n").unwrap();
+    update(&store, &mut state, Target::All, true).unwrap();
+    let generated: Value = storage::read_yaml(&output).unwrap();
+    assert_eq!(generated["rules"][0], "MATCH,DIRECT");
+    assert_eq!(generated["proxies"].as_sequence().unwrap().len(), 1);
+    assert_eq!(fs::read(store.root.join("sources.yaml")).unwrap(), before);
+}
+
+#[test]
+fn no_sync_without_cached_proxies_does_not_write_output() {
+    let (_temp, store, output) = setup();
+    let mut state = State {
+        next_id: 1,
+        sources: vec![direct(1, "Fresh")],
+    };
+    store.save(&state).unwrap();
+    assert!(update(&store, &mut state, Target::All, true).is_err());
+    assert!(!output.exists());
+    assert!(update(&store, &mut state, Target::Index(1), true).is_err());
 }

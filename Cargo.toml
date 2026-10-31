@@ -2,7 +2,7 @@
 name = "minohomo"
 version = "0.1.4"
 edition = "2024"
-description = "Root-only subscription manager and Mihomo config generator"
+description = "Subscription manager and Mihomo config generator"
 license = "GPL-3.0-only"
 
 [dependencies]
@@ -22,15 +22,16 @@ url = "2"
 
 [package.metadata.deb]
 extended-description = """
-Import proxy subscriptions and direct proxy links into a shared Mihomo config.
+Import proxy subscriptions and direct proxy links into a per-user Mihomo config.
 Apply editable local routing rules, manage geosite data, validate generated
-configuration, and reload the existing daemon. Requires root access and a
-separately installed Mihomo binary. Subscription updates are manual.
+configuration, and use sudo to install it for the system Mihomo service.
+Requires a separately installed Mihomo binary and service. Subscription updates
+are manual.
 """
 maintainer = "Alex Karev <alexkarev@sjtu.edu.cn>"
 copyright = "2026, Alex Karev <alexkarev@sjtu.edu.cn>"
 license-file = ["LICENSE", "0"]
-depends = "$auto, ca-certificates"
+depends = "$auto, ca-certificates, sudo"
 recommends = "systemd"
 suggests = "mihomo"
 section = "net"

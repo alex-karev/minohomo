@@ -16,6 +16,7 @@ use tempfile::NamedTempFile;
 pub struct Settings {
     pub output: PathBuf,
     pub mihomo_binary: PathBuf,
+    #[serde(default)]
     pub reload_command: Vec<String>,
     pub request_timeout_seconds: u64,
     #[serde(default = "default_geosite_url")]
@@ -122,12 +123,12 @@ impl Store {
         read_yaml(&self.root.join("sources.yaml"))
     }
     pub fn settings(&self) -> Result<Settings> {
-        let s: Settings = read_yaml(&self.root.join("config.yaml"))?;
+        let mut s: Settings = read_yaml(&self.root.join("config.yaml"))?;
+        // Relative outputs follow --config-dir, not the process working directory.
+        if s.output.is_relative() {
+            s.output = self.root.join(&s.output);
+        }
         ensure!(s.output.is_absolute(), "output must be an absolute path");
-        ensure!(
-            !s.reload_command.is_empty(),
-            "reload-command cannot be empty"
-        );
         ensure!(
             s.request_timeout_seconds > 0,
             "request-timeout-seconds must be positive"
@@ -202,6 +203,28 @@ mod tests {
             fs::read_to_string(dir.path().join("rules.yaml")).unwrap(),
             "rules: [MATCH,REJECT]"
         );
+    }
+    #[test]
+    fn default_output_and_apply_use_user_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let settings = store.settings().unwrap();
+        assert_eq!(settings.output, dir.path().join("current.yaml"));
+        assert!(settings.reload_command.is_empty());
+        assert!(store.root.join("config.yaml").exists());
+        assert!(store.root.join("rules.yaml").exists());
+        assert!(store.root.join("sources.yaml").exists());
+    }
+    #[test]
+    fn relative_output_cannot_overwrite_source_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        for output in ["config.yaml", "rules.yaml", "sources.yaml"] {
+            let body = include_str!("../defaults/config.yaml")
+                .replace("output: current.yaml", &format!("output: {output}"));
+            fs::write(store.root.join("config.yaml"), body).unwrap();
+            assert!(store.settings().is_err());
+        }
     }
     #[test]
     fn lock_prevents_concurrent_updates() {
