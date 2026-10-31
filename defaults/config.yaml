@@ -1,0 +1,102 @@
+# minohomo settings. Existing files are never overwritten by init.
+output: /etc/mihomo/config.yaml
+mihomo-binary: /usr/bin/mihomo
+reload-command: [systemctl, reload, mihomo.service]
+request-timeout-seconds: 45
+# Change this URL to use another geosite database or mirror.
+# minohomo geosite update --url URL overrides it for one download.
+geosite-url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat
+
+# Applied to every imported proxy during generation, without changing its cache.
+# Chrome works with the tested REALITY servers; their Firefox fingerprint fails.
+# Set {} to preserve each source's original fingerprint.
+proxy-overrides:
+  client-fingerprint: chrome
+
+# Copied into the generated Mihomo config. Source proxies, groups, and rules
+# are ignored. minohomo replaces proxies, rules, and rule-providers.
+# Define additional proxy groups here if your custom rules need them.
+mihomo:
+  # The mixed listener serves SOCKS5 and HTTP on the same loopback port.
+  mixed-port: 7897
+  allow-lan: false
+  bind-address: 127.0.0.1
+  mode: rule
+  log-level: info
+  ipv6: true
+  external-controller: 127.0.0.1:9090
+  # init replaces this placeholder with a random API secret.
+  secret: '__MINOHOMO_API_SECRET__'
+  profile:
+    store-selected: true
+    store-fake-ip: true
+  geodata-mode: true
+  geo-auto-update: false
+  tun:
+    enable: true
+    device: mihomo
+    # The kernel TCP path in mixed mode stalls on the tested Debian host.
+    # gvisor handles TCP in userspace and passed transparent routing tests.
+    stack: gvisor
+    auto-route: true
+    # Enabling this failed with an existing nftables object on the tested host.
+    auto-redirect: false
+    auto-detect-interface: true
+    strict-route: false
+    dns-hijack: [any:53, 'tcp://any:53']
+    # Leave local and Tailscale routes to the OS, outside TUN.
+    # Keep these aligned with local IP rules in rules.yaml.
+    route-exclude-address:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 224.0.0.0/4
+      - 240.0.0.0/4
+      - ::/128
+      - ::1/128
+      - fc00::/7
+      - fe80::/10
+      - ff00::/8
+  dns:
+    enable: true
+    listen: 127.0.0.1:1053
+    ipv6: true
+    enhanced-mode: fake-ip
+    fake-ip-range: 198.18.0.1/16
+    # +. matches every subdomain depth, including host.tailnet.ts.net.
+    fake-ip-filter: ['+.lan', '+.local', '+.localhost', '+.home.arpa', '+.ts.net']
+    # Literal-IP DoH avoids bootstrapping a resolver hostname through OS DNS.
+    # With TUN active, auto-detection can pin OS/Tailscale DNS to the physical
+    # interface, while external UDP DNS queries can be hijacked into fake-IP.
+    default-nameserver: [https://223.5.5.5/dns-query]
+    nameserver: [https://223.5.5.5/dns-query]
+    proxy-server-nameserver: [https://223.5.5.5/dns-query]
+    nameserver-policy:
+      # Force MagicDNS through Tailscale instead of the detected Wi-Fi NIC.
+      '+.ts.net': '100.100.100.100#tailscale0'
+      'geosite:cn,alibaba,tencent': https://223.5.5.5/dns-query
+  # Clients can use LAN DNS outside TUN, returning stale or poisoned IPs.
+  # Recover hostnames for routing AND replace the IP before proxy forwarding.
+  sniffer:
+    enable: true
+    parse-pure-ip: true
+    override-destination: true
+    sniff:
+      HTTP:
+        ports: [80, 8080-8880]
+        override-destination: true
+      TLS:
+        ports: [443, 8443]
+        override-destination: true
+      QUIC:
+        ports: [443, 8443]
+        override-destination: true
+  # Select the first imported node by default. Mihomo remembers your selection.
+  proxy-groups:
+    - name: PROXY
+      type: select
+      include-all: true

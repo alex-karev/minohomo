@@ -1,0 +1,43 @@
+[package]
+name = "minohomo"
+version = "0.1.4"
+edition = "2024"
+description = "Root-only subscription manager and Mihomo config generator"
+license = "GPL-3.0-only"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+percent-encoding = "2"
+prost = "0.14"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "gzip", "system-proxy"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tempfile = "3"
+url = "2"
+
+[package.metadata.deb]
+extended-description = """
+Import proxy subscriptions and direct proxy links into a shared Mihomo config.
+Apply editable local routing rules, manage geosite data, validate generated
+configuration, and reload the existing daemon. Requires root access and a
+separately installed Mihomo binary. Subscription updates are manual.
+"""
+maintainer = "Alex Karev <alexkarev@sjtu.edu.cn>"
+copyright = "2026, Alex Karev <alexkarev@sjtu.edu.cn>"
+license-file = ["LICENSE", "0"]
+depends = "$auto, ca-certificates"
+recommends = "systemd"
+suggests = "mihomo"
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/minohomo", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/minohomo/README.md", "644"],
+    ["defaults/config.yaml", "usr/share/doc/minohomo/defaults/config.yaml", "644"],
+    ["defaults/rules.yaml", "usr/share/doc/minohomo/defaults/rules.yaml", "644"],
+]

@@ -1,0 +1,146 @@
+name: Debian packages
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debian-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Debian 12 / ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    container: debian:bookworm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_DEB_VERSION: "3.7.0"
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            build-essential ca-certificates cmake curl dpkg-dev git jq \
+            pkg-config xz-utils zstd
+          test "$(dpkg --print-architecture)" = "${{ matrix.arch }}"
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build files
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: debian-bookworm-${{ matrix.arch }}
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Check release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "minohomo") | .version')
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME must match Cargo.toml version v$version"
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --version "=$CARGO_DEB_VERSION" --locked
+
+      - name: Build Debian package
+        run: |
+          mkdir -p dist
+          cargo deb --locked --output dist/
+
+      - name: Inspect and smoke-test package
+        run: |
+          shopt -s nullglob
+          packages=(dist/*.deb)
+          test "${#packages[@]}" -eq 1
+          package="${packages[0]}"
+          test "$(dpkg-deb --field "$package" Package)" = minohomo
+          test "$(dpkg-deb --field "$package" Architecture)" = "${{ matrix.arch }}"
+          dpkg-deb --info "$package"
+          dpkg-deb --contents "$package"
+          dpkg-deb --extract "$package" target/deb-smoke
+          version=$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "minohomo") | .version')
+          test "$(target/deb-smoke/usr/bin/minohomo --version)" = "minohomo $version"
+          # Installing the package must not configure or activate the daemon.
+          test ! -e target/deb-smoke/etc
+          test ! -e target/deb-smoke/usr/lib/systemd/system
+          test ! -e target/deb-smoke/lib/systemd/system
+          cd dist
+          sha256sum *.deb > "SHA256SUMS-${{ matrix.arch }}"
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: minohomo-debian-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release packages
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Debian packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: minohomo-debian-*
+          merge-multiple: true
+          path: dist
+
+      - name: Combine and verify checksums
+        run: |
+          cd dist
+          cat SHA256SUMS-* > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.deb
+            dist/SHA256SUMS
