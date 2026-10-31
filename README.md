@@ -202,19 +202,17 @@ Automatic geodata updates are disabled by default. Subscription updates reuse th
 
 ## Supported imports
 
-Subscription bodies can contain:
-
-- Clash/Mihomo YAML with a `proxies` list, or a YAML list of proxy objects.
+Standard V2Ray subscription bodies can contain:
 - Plain-text proxy links, one per line.
 - Base64-encoded proxy-link lists, including URL-safe and unpadded base64.
 
 Direct links support VLESS, VMess base64 JSON, Trojan, Shadowsocks, ShadowsocksR, Hysteria v1, Hysteria2 (`hy2`), TUIC v5, SOCKS5, HTTP, and HTTPS. Common VLESS/VMess TCP, WebSocket, gRPC, HTTP, H2, TLS, and REALITY options are supported. Shadowsocks supports legacy and SIP002 links with common obfs and v2ray plugins.
 
-For advanced transports or vendor-specific options, use a Clash YAML subscription. XHTTP and arbitrary plugin formats are not supported. Proxies with `dialer-proxy` dependencies or non-proxy DIRECT/REJECT types are rejected. Mihomo performs final protocol validation.
+Clash YAML subscriptions, XHTTP, and arbitrary plugin formats are not supported. Proxies with `dialer-proxy` dependencies or non-proxy DIRECT/REJECT types are rejected. Mihomo performs final protocol validation.
 
 REALITY imports preserve `support-x25519mlkem768` when supplied. Mihomo has no SpiderX field, so Xray's `spx` is not mapped to a YAML option. Fingerprint behavior can differ between cores; edit `proxy-overrides` if needed.
 
-HTTP downloads verify certificates, enforce timeouts, follow at most five redirects, and limit subscriptions to 16 MiB. Proxy environment variables apply when present in the root process; `sudo` may strip them.
+Subscription requests use `V2rayNG/1.8.12` as the User-Agent for compatibility with 3x-ui. HTTP downloads verify certificates, enforce timeouts, follow at most five redirects, and limit subscriptions to 16 MiB. Proxy environment variables apply when present in the root process; `sudo` may strip them.
 
 ## Troubleshooting
 

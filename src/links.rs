@@ -111,9 +111,7 @@ fn transport(p: &mut Proxy, q: &HashMap<String, String>, url: &Url) -> Result<()
                 opts,
             );
         }
-        _ => bail!(
-            "unsupported transport '{network}'; import a Clash YAML subscription for this node"
-        ),
+        _ => bail!("unsupported transport '{network}'"),
     }
     let security = q.get("security").map(String::as_str).unwrap_or("");
     ensure!(
@@ -168,13 +166,13 @@ fn transport(p: &mut Proxy, q: &HashMap<String, String>, url: &Url) -> Result<()
     // Refuse features which would otherwise be silently lost during conversion.
     for key in ["ech", "echConfig", "packetEncoding"] {
         if q.get(key).is_some_and(|v| !v.is_empty()) {
-            bail!("unsupported link parameter '{key}'; use Clash YAML");
+            bail!("unsupported link parameter '{key}'");
         }
     }
     if q.get("headerType")
         .is_some_and(|v| v != "none" && !v.is_empty())
     {
-        bail!("TCP header obfuscation is unsupported; use Clash YAML")
+        bail!("TCP header obfuscation is unsupported")
     }
     Ok(())
 }
@@ -447,25 +445,15 @@ pub fn parse_link(link: &str) -> Result<Proxy> {
 }
 
 pub fn parse_subscription(body: &str) -> Result<Vec<Proxy>> {
-    // Only import proxies. Never trust a subscription's rules, groups or listeners.
-    if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(body) {
-        if let Some(proxies) = value.get("proxies") {
-            let proxies: Vec<Proxy> =
-                serde_yaml::from_value(proxies.clone()).context("invalid Clash proxies list")?;
-            return validate_proxies(proxies);
-        }
-        if let Some(proxies) = value.as_sequence()
-            && proxies.iter().all(|p| p.is_mapping())
-        {
-            return validate_proxies(serde_yaml::from_value(value)?);
-        }
-    }
+    // V2Ray subscriptions contain newline-separated share links, usually base64 encoded.
+    // Import only nodes; local config generation remains the source of routing policy.
+    let body = body.trim().trim_start_matches('\u{feff}').trim();
     let decoded_body;
     let text = if body.trim().contains("://") {
         body
     } else {
         decoded_body =
-            text64(body).context("expected Clash YAML, proxy links, or a base64 subscription")?;
+            text64(body).context("expected proxy links or a base64 V2Ray subscription")?;
         &decoded_body
     };
     let mut proxies = Vec::new();
@@ -581,16 +569,54 @@ mod tests {
         assert_eq!(p["ws-opts"]["path"], "/test");
     }
     #[test]
-    fn ignores_upstream_policy() {
-        let p=parse_subscription("proxies:\n- {name: node, type: ss, server: host.test, port: 443, cipher: aes-128-gcm, password: test}\nrules: [MATCH,DIRECT]\nproxy-groups: [{name: Evil}]\n").unwrap();
-        assert_eq!(p.len(), 1);
-        assert_eq!(p[0]["name"], "node");
+    fn rejects_clash_subscriptions() {
+        for body in [
+            "proxies:\n- {name: node, type: ss, server: host.test, port: 443, cipher: aes-128-gcm, password: test}\n",
+            "- {name: node, type: ss, server: host.test, port: 443, cipher: aes-128-gcm, password: test}\n",
+        ] {
+            assert!(parse_subscription(body).is_err());
+        }
     }
     #[test]
-    fn base64_subscription() {
-        let body =
-            STANDARD_NO_PAD.encode("trojan://pass@a.test:443#A\nvless://uuid@b.test:8443#B\n");
-        assert_eq!(parse_subscription(&body).unwrap().len(), 2);
+    fn v2ray_subscription_encodings() {
+        let links = "trojan://pass@a.test:443#A\r\nvless://uuid@b.test:8443#B\r\n";
+        let expected = parse_subscription(links).unwrap();
+        assert_eq!(expected.len(), 2);
+        for engine in [&STANDARD, &STANDARD_NO_PAD, &URL_SAFE, &URL_SAFE_NO_PAD] {
+            let encoded = engine.encode(links);
+            let wrapped = encoded
+                .as_bytes()
+                .chunks(32)
+                .map(|chunk| std::str::from_utf8(chunk).unwrap())
+                .collect::<Vec<_>>()
+                .join("\r\n");
+            assert_eq!(parse_subscription(&encoded).unwrap(), expected);
+            assert_eq!(
+                parse_subscription(&format!("\u{feff}  {wrapped}\n")).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            parse_subscription(&format!("\u{feff}# nodes\n\n{links}")).unwrap(),
+            expected
+        );
+    }
+    #[test]
+    fn three_x_ui_reality_subscription() {
+        // Same options as the reference feed, with synthetic credentials/endpoints.
+        let link = "vless://uuid@host.test:443?type=tcp&encryption=none&security=reality&pbk=public&fp=firefox&sni=sni.test&sid=0123456789abcd&spx=%2Ftest&flow=xtls-rprx-vision&support-x25519mlkem768=true#Node%20One";
+        for body in [link.to_string(), STANDARD.encode(link)] {
+            let proxies = parse_subscription(&body).unwrap();
+            let p = &proxies[0];
+            assert_eq!(p["name"], "Node One");
+            assert_eq!(p["flow"], "xtls-rprx-vision");
+            assert_eq!(p["tls"], true);
+            assert_eq!(p["servername"], "sni.test");
+            assert_eq!(p["client-fingerprint"], "firefox");
+            assert_eq!(p["reality-opts"]["public-key"], "public");
+            assert_eq!(p["reality-opts"]["short-id"], "0123456789abcd");
+            assert_eq!(p["reality-opts"]["support-x25519mlkem768"], true);
+        }
     }
     #[test]
     fn extra_protocols() {

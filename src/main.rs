@@ -354,7 +354,7 @@ fn update(store: &Store, state: &mut State, target: Target) -> Result<()> {
 fn http_client(settings: &Settings) -> Result<Client> {
     Ok(Client::builder()
         .timeout(Duration::from_secs(settings.request_timeout_seconds))
-        .user_agent("clash.meta/minohomo")
+        .user_agent("V2rayNG/1.8.12")
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()?)
 }
