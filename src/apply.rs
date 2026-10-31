@@ -35,6 +35,24 @@ pub fn run(config: &Path, geosite: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+pub fn service(action: &str) -> Result<()> {
+    ensure!(
+        unsafe { libc::geteuid() } == 0,
+        "service control requires root; run it with sudo"
+    );
+    ensure!(
+        ["start", "stop"].contains(&action),
+        "unsupported service action"
+    );
+    let status = Command::new("/usr/bin/systemctl")
+        .args([action, "mihomo.service"])
+        .status()
+        .context("cannot run systemctl")?;
+    ensure!(status.success(), "systemctl {action} mihomo.service failed");
+    println!("Mihomo service {action} succeeded.");
+    Ok(())
+}
+
 fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     let file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
     ensure!(

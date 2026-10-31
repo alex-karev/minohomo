@@ -1,3 +1,4 @@
+mod api;
 mod apply;
 mod geosite;
 #[cfg(test)]
@@ -56,7 +57,28 @@ enum Action {
         name: Option<String>,
     },
     /// Show source names, cached proxy counts, and last update times
-    List,
+    List {
+        /// Show cached node display names below subscription entries
+        #[arg(long)]
+        full: bool,
+    },
+    /// Check delays for all entries returned by the Mihomo API, fastest first
+    Ping,
+    /// Show the current mode, or change it without rewriting local config
+    Mode {
+        #[arg(value_enum)]
+        mode: Option<api::Mode>,
+    },
+    /// Print the generated current.yaml without changing it
+    Dump,
+    /// Print the external controller URL and secret
+    Controller,
+    /// Select a proxy in PROXY; omit the name to show its current selection
+    Switch { proxyname: Option<String> },
+    /// Start the system Mihomo service through sudo
+    Start,
+    /// Stop the system Mihomo service through sudo
+    Stop,
     /// Remove a source and its cache; run update afterward to apply to Mihomo
     Delete {
         /// Exact source name
@@ -149,39 +171,70 @@ fn run(cli: Cli) -> Result<()> {
     if let Action::Apply { config, geosite } = &cli.command {
         return apply::run(config, geosite.as_deref());
     }
+    if matches!(cli.command, Action::Start | Action::Stop) {
+        let action = if matches!(cli.command, Action::Start) {
+            "start"
+        } else {
+            "stop"
+        };
+        if unsafe { libc::geteuid() } == 0 {
+            return apply::service(action);
+        }
+        let status = sudo_self()?
+            .arg(action)
+            .status()
+            .context("cannot run sudo service command")?;
+        ensure!(status.success(), "Mihomo {action} failed");
+        return Ok(());
+    }
     let config_dir = cli.config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
     let store = Store::open(&config_dir)?;
     if let Action::Geosite { command } = &cli.command {
         return geosite::run(&store, command);
     }
+    match &cli.command {
+        Action::Ping => return api::Controller::new(&store.settings()?)?.ping(),
+        Action::Mode { mode } => {
+            let controller = api::Controller::new(&store.settings()?)?;
+            if let Some(mode) = mode {
+                return controller.mode(*mode);
+            }
+            println!("Mihomo mode: {}", controller.current_mode()?);
+            return Ok(());
+        }
+        Action::Dump => {
+            return dump_config(&store.settings()?.output, &mut std::io::stdout().lock());
+        }
+        Action::Controller => {
+            print!("{}", api::Controller::new(&store.settings()?)?.info());
+            return Ok(());
+        }
+        Action::Switch { proxyname } => {
+            let settings = store.settings()?;
+            let controller = api::Controller::new(&settings)?;
+            if let Some(name) = proxyname {
+                let state = store.state()?;
+                let generated = named_proxies(&settings, &state)?;
+                let name = resolve_switch(name, &state, &generated)?;
+                return controller.switch(&name);
+            }
+            return controller.selection();
+        }
+        _ => {}
+    }
     let mut state = store.state()?;
     match cli.command {
-        Action::Geosite { .. } | Action::Apply { .. } => unreachable!(),
+        Action::Geosite { .. }
+        | Action::Apply { .. }
+        | Action::Ping
+        | Action::Mode { .. }
+        | Action::Dump
+        | Action::Controller
+        | Action::Switch { .. }
+        | Action::Start
+        | Action::Stop => unreachable!(),
         Action::Init => println!("Config files ready in {}", store.root.display()),
-        Action::List => {
-            if state.sources.is_empty() {
-                println!("No sources. Add one with: minohomo add 'URL_OR_PROXY_LINK'");
-            }
-            for s in &state.sources {
-                let updated = s
-                    .updated_at
-                    .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-                    .unwrap_or_else(|| "never".into());
-                let kind = if s.kind == SourceKind::Subscription {
-                    "subscription"
-                } else {
-                    "proxy"
-                };
-                println!(
-                    "{} [{}] {}\n   Last update: {} | Cached proxies: {}",
-                    s.name.as_deref().context("source has no name")?,
-                    kind,
-                    s.link,
-                    updated,
-                    s.proxies.len()
-                );
-            }
-        }
+        Action::List { full } => print!("{}", format_list(&state, full)?),
         Action::Add { links, proxy, name } => {
             ensure!(
                 name.is_none() || links.len() == 1,
@@ -242,6 +295,105 @@ fn run(cli: Cli) -> Result<()> {
     }
     Ok(())
 }
+fn dump_config(path: &std::path::Path, output: &mut impl std::io::Write) -> Result<()> {
+    let mut file = std::fs::File::open(path)
+        .with_context(|| format!("cannot open {}; run minohomo update first", path.display()))?;
+    std::io::copy(&mut file, output).context("cannot write generated config")?;
+    Ok(())
+}
+fn format_list(state: &State, full: bool) -> Result<String> {
+    use std::fmt::Write;
+    let mut output = String::new();
+    if state.sources.is_empty() {
+        writeln!(
+            output,
+            "No sources. Add one with: minohomo add 'URL_OR_PROXY_LINK'"
+        )?;
+    }
+    for source in &state.sources {
+        let updated = source
+            .updated_at
+            .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            .unwrap_or_else(|| "never".into());
+        let kind = if source.kind == SourceKind::Subscription {
+            "subscription"
+        } else {
+            "proxy"
+        };
+        writeln!(
+            output,
+            "{} [{}] {}\n   Last update: {} | Cached proxies: {}",
+            source.name.as_deref().context("source has no name")?,
+            kind,
+            source.link,
+            updated,
+            source.proxies.len()
+        )?;
+        if full && source.kind == SourceKind::Subscription {
+            for proxy in &source.proxies {
+                writeln!(
+                    output,
+                    "      {}",
+                    proxy
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("proxy")
+                )?;
+            }
+        }
+    }
+    Ok(output)
+}
+fn resolve_switch(input: &str, state: &State, generated: &[(u64, links::Proxy)]) -> Result<String> {
+    let source = state
+        .sources
+        .iter()
+        .find(|s| s.name.as_deref() == Some(input));
+    let named = |proxy: &links::Proxy| proxy["name"].as_str().unwrap().to_owned();
+    let mut matches: Vec<_> = generated
+        .iter()
+        .filter(|(id, proxy)| {
+            if let Some(source) = source {
+                return source.id == *id;
+            }
+            proxy.get("name").and_then(serde_json::Value::as_str) == Some(input)
+        })
+        .map(|(_, proxy)| named(proxy))
+        .collect();
+    if source.is_none() && matches.is_empty() {
+        // list --full exposes cached display names, not generated subscription prefixes.
+        matches = generated
+            .iter()
+            .zip(state.sources.iter().flat_map(|source| &source.proxies))
+            .filter(|(_, original)| {
+                original.get("name").and_then(serde_json::Value::as_str) == Some(input)
+            })
+            .map(|((_, proxy), _)| named(proxy))
+            .collect();
+    }
+    ensure!(
+        !matches.is_empty(),
+        "no cached proxy for '{input}'; use list --full and update first"
+    );
+    ensure!(
+        matches.len() == 1,
+        "'{input}' matches several proxies; use the full generated name: {}",
+        matches.join(", ")
+    );
+    Ok(matches[0].clone())
+}
+fn sudo_self() -> Result<Command> {
+    let executable = std::env::current_exe().context("cannot locate minohomo executable")?;
+    let command = if unsafe { libc::geteuid() } == 0 {
+        Command::new(&executable)
+    } else {
+        let mut command = Command::new("sudo");
+        command.arg("--").arg(&executable);
+        command
+    };
+    // Do not pass --config-dir into the privileged subcommand.
+    Ok(command)
+}
 fn classify(link: &str, force_proxy: bool) -> Result<SourceKind> {
     let url = Url::parse(link).context("invalid source URL")?;
     if ["http", "https"].contains(&url.scheme()) && !force_proxy {
@@ -284,8 +436,8 @@ fn fetch(client: &Client, source: &Source) -> Result<Vec<links::Proxy>> {
     let text = String::from_utf8(bytes).context("subscription is not UTF-8 text")?;
     links::parse_subscription(&text)
 }
-fn generate(settings: &Settings, policy: &Policy, state: &State) -> Result<Value> {
-    let mut out = settings.mihomo.clone();
+fn named_proxies(settings: &Settings, state: &State) -> Result<Vec<(u64, links::Proxy)>> {
+    let out = &settings.mihomo;
     let mut names = HashSet::new();
     if let Some(groups) = out.get(key("proxy-groups")).and_then(Value::as_sequence) {
         for group in groups {
@@ -331,9 +483,17 @@ fn generate(settings: &Settings, policy: &Policy, state: &State) -> Result<Value
                 suffix += 1;
             }
             p.insert("name".into(), name.into());
-            proxies.push(serde_yaml::to_value(p)?);
+            proxies.push((source.id, p));
         }
     }
+    Ok(proxies)
+}
+fn generate(settings: &Settings, policy: &Policy, state: &State) -> Result<Value> {
+    let mut out = settings.mihomo.clone();
+    let proxies = named_proxies(settings, state)?
+        .into_iter()
+        .map(|(_, proxy)| serde_yaml::to_value(proxy))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     ensure!(
         !proxies.is_empty(),
         "no cached proxies; add and update at least one nonempty source"
@@ -451,14 +611,7 @@ fn reload(settings: &Settings, saved: &str) -> Result<()> {
         command.args(&settings.reload_command[1..]);
         command
     } else {
-        let executable = std::env::current_exe().context("cannot locate minohomo executable")?;
-        let mut command = if unsafe { libc::geteuid() } == 0 {
-            Command::new(executable)
-        } else {
-            let mut command = Command::new("sudo");
-            command.arg("--").arg(executable);
-            command
-        };
+        let mut command = sudo_self()?;
         command.arg("apply").arg("--config").arg(&settings.output);
         let database = settings
             .output
@@ -621,6 +774,129 @@ mod tests {
             assert_eq!(state.sources.len(), 1);
             assert_eq!(state.sources[0].id, 2);
         }
+    }
+    #[test]
+    fn full_list_only_expands_subscriptions_with_indented_display_names() {
+        let mut subscription = source(1);
+        subscription.kind = SourceKind::Subscription;
+        subscription.name = Some("Sub".into());
+        subscription.proxies =
+            vec![links::parse_link("trojan://pwd@host.test:443#Node%20One").unwrap()];
+        let mut direct = source(2);
+        direct.proxies =
+            vec![links::parse_link("trojan://pwd@host.test:443#Direct%20Node").unwrap()];
+        let state = State {
+            next_id: 2,
+            sources: vec![subscription, direct],
+        };
+        let plain = format_list(&state, false).unwrap();
+        let expanded = format_list(&state, true).unwrap();
+        assert_eq!(expanded.replace("      Node One\n", ""), plain);
+        assert!(!expanded.contains("      Direct Node"));
+        assert!(expanded.contains("Cached proxies: 1\n      Node One\n"));
+    }
+    #[test]
+    fn switch_resolves_source_names_and_generated_subscription_names() {
+        let settings: Settings =
+            serde_yaml::from_str(include_str!("../defaults/config.yaml")).unwrap();
+        let mut subscription = source(1);
+        subscription.kind = SourceKind::Subscription;
+        subscription.name = Some("Sub".into());
+        subscription.proxies = vec![
+            links::parse_link("trojan://pwd@host.test:443#One").unwrap(),
+            links::parse_link("trojan://pwd@host.test:443#Two").unwrap(),
+        ];
+        let mut direct = source(2);
+        direct.name = Some("Personal".into());
+        let state = State {
+            next_id: 2,
+            sources: vec![subscription, direct],
+        };
+        let generated = named_proxies(&settings, &state).unwrap();
+        assert_eq!(
+            resolve_switch("Personal", &state, &generated).unwrap(),
+            "same"
+        );
+        assert_eq!(
+            resolve_switch("Sub: One", &state, &generated).unwrap(),
+            "Sub: One"
+        );
+        assert_eq!(
+            resolve_switch("One", &state, &generated).unwrap(),
+            "Sub: One"
+        );
+        assert!(
+            resolve_switch("Sub", &state, &generated)
+                .unwrap_err()
+                .to_string()
+                .contains("several proxies")
+        );
+        assert!(resolve_switch("unknown", &state, &generated).is_err());
+    }
+    #[test]
+    fn switch_handles_ambiguous_display_names_and_collision_suffixes() {
+        let settings: Settings =
+            serde_yaml::from_str(include_str!("../defaults/config.yaml")).unwrap();
+        let mut first = source(1);
+        first.kind = SourceKind::Subscription;
+        first.name = Some("A".into());
+        let mut second = source(2);
+        second.kind = SourceKind::Subscription;
+        second.name = Some("B".into());
+        let state = State {
+            next_id: 4,
+            sources: vec![first, second, source(3), source(4)],
+        };
+        let generated = named_proxies(&settings, &state).unwrap();
+        // Exact generated names take precedence over bare display-name matching.
+        assert_eq!(
+            resolve_switch("A: same", &state, &generated).unwrap(),
+            "A: same"
+        );
+        assert_eq!(
+            resolve_switch("source4", &state, &generated).unwrap(),
+            "same (1)"
+        );
+        let mut only_subs = state;
+        only_subs.sources.truncate(2);
+        let generated = named_proxies(&settings, &only_subs).unwrap();
+        assert!(
+            resolve_switch("same", &only_subs, &generated)
+                .unwrap_err()
+                .to_string()
+                .contains("matches several proxies")
+        );
+    }
+    #[test]
+    fn dump_preserves_generated_config_bytes_and_reports_missing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("current.yaml");
+        let mut output = Vec::new();
+        assert!(dump_config(&path, &mut output).is_err());
+        assert!(output.is_empty());
+        let body = b"# generated\r\nmode: rule\nsecret: test-secret";
+        std::fs::write(&path, body).unwrap();
+        dump_config(&path, &mut output).unwrap();
+        assert_eq!(output, body);
+    }
+    #[test]
+    fn runtime_command_syntax() {
+        for arguments in [
+            vec!["minohomo", "list", "--full"],
+            vec!["minohomo", "ping"],
+            vec!["minohomo", "mode"],
+            vec!["minohomo", "dump"],
+            vec!["minohomo", "controller"],
+            vec!["minohomo", "mode", "rule"],
+            vec!["minohomo", "mode", "direct"],
+            vec!["minohomo", "switch"],
+            vec!["minohomo", "switch", "Personal"],
+            vec!["minohomo", "start"],
+            vec!["minohomo", "stop"],
+        ] {
+            assert!(Cli::try_parse_from(arguments).is_ok());
+        }
+        assert!(Cli::try_parse_from(["minohomo", "mode", "global"]).is_err());
     }
     #[test]
     fn source_names_and_node_display_names_are_separate() {

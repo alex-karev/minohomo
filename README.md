@@ -71,7 +71,14 @@ Omit `--geosite` to preserve the system database. The helper accepts only config
 minohomo init
 minohomo add <LINK>... [--name NAME]
 minohomo add --proxy <HTTP_OR_HTTPS_PROXY_LINK>... [--name NAME]
-minohomo list
+minohomo list [--full]
+minohomo ping
+minohomo mode [rule|direct]
+minohomo dump
+minohomo controller
+minohomo switch [PROXYNAME]
+minohomo start
+minohomo stop
 minohomo delete <NAME>
 minohomo update [NAME] [--no-sync]
 minohomo geosite status
@@ -84,6 +91,13 @@ sudo minohomo apply --config PATH [--geosite PATH]
 | `init` | Creates missing config files without overwriting existing ones. Other application commands also initialize missing files. |
 | `add` | Validates and saves links. Does not fetch subscriptions or reload Mihomo. HTTP(S) URLs mean subscriptions unless `--proxy` is supplied. |
 | `list` | Shows unique source names, links, last successful update times in UTC, and cached proxy counts. |
+| `list --full` | Adds indented cached node display names below each subscription. Does not expand independent proxies or fetch anything. |
+| `ping` | Checks delays for every entry returned by Mihomo's `/proxies` API. Prints successful checks fastest first, then failed checks. |
+| `mode [rule\|direct]` | With no argument, shows the current mode from the running Mihomo API. With an argument, changes it. |
+| `dump` | Prints the generated `current.yaml` verbatim, without generating or applying anything. |
+| `controller` | Prints the controller URL, then `secret: SECRET` on the next line. Does not contact Mihomo. |
+| `switch [PROXYNAME]` | Selects a proxy in the `PROXY` group. With no argument, shows the current selection and available names. |
+| `start`, `stop` | Uses a sudo subcommand to start or stop the system `mihomo.service`. Does not generate or install a config. |
 | `delete NAME` | Removes the named source and its cache. Run `update --no-sync` to apply the removal. |
 | `update` | Refreshes all sources, generates and validates the merged config, then installs it through sudo and restarts Mihomo. |
 | `update NAME` | Refreshes one source and regenerates using cached proxies from all other sources. Never-updated sources are omitted with a message. |
@@ -183,21 +197,60 @@ curl --proxy socks5h://127.0.0.1:7897 https://example.com
 
 Mihomo remembers the selected node. Without a saved selection, the selector uses its default choice. It does not automatically fail over.
 
-The API listens on `127.0.0.1:9090`. `init` generates a random secret stored as `mihomo.secret` in `~/.config/minohomo/config.yaml`. Use a compatible dashboard or the API:
+The API listens on `127.0.0.1:9090`. `init` generates a random secret stored as `mihomo.secret` in `~/.config/minohomo/config.yaml`. Runtime commands use `external-controller` and `secret` from the last generated `current.yaml`, falling back to the base settings if it does not exist. Controller requests bypass proxy environment variables. The running daemon must use the same config and secret. `minohomo controller` prints that URL and secret without requiring the service to be running:
+
+```text
+http://127.0.0.1:9090
+secret: YOUR_SECRET
+```
+
+`minohomo dump` prints the generated config file exactly as saved (or the configured `output` path). It reports an error if no generated config exists. Both commands can expose credentials; avoid sending their output to public logs.
 
 ```sh
-curl -H 'Authorization: Bearer YOUR_SECRET' \
-  http://127.0.0.1:9090/proxies/PROXY
-
-curl -X PUT http://127.0.0.1:9090/proxies/PROXY \
-  -H 'Authorization: Bearer YOUR_SECRET' \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"EXACT_IMPORTED_NODE_NAME"}'
+minohomo ping
+minohomo mode
+minohomo mode direct
+minohomo mode rule
+minohomo switch Personal
+minohomo switch 'FooBar: Proxy1'
+minohomo switch
 ```
+
+`ping` uses Mihomo's HTTP delay check, not ICMP. It requests `https://www.gstatic.com/generate_204` with a five-second timeout per entry and up to eight checks in parallel. It uses API names without matching them to local sources. All entries returned by Mihomo are checked, including groups and built-in entries. Failed checks appear last.
+
+`switch` accepts an independent proxy's saved source name, a full generated node name, or a unique cached node display name from `list --full`. It uses the same name-generation logic as `current.yaml`, including subscription prefixes and duplicate suffixes. A subscription source name works only when it contains one cached node. If a name matches several nodes, the error lists the full names to use. The selected node must also exist in the running `PROXY` group; apply updated caches before switching.
+
+`mode` and `switch` do not rewrite local settings, refresh subscriptions, or restart Mihomo. Mode changes last until changed again or the config is reloaded. To change the mode after future restarts, edit `mihomo.mode` and regenerate. Proxy selection persistence follows Mihomo's `profile.store-selected` setting.
+
+### Expanded subscription listing
+
+```sh
+minohomo list --full
+```
+
+The normal listing stays unchanged; subscription node names appear below their entry with extra indentation:
+
+```text
+FooBar [subscription] https://subscription.example/profile
+   Last update: 2026-11-01T00:00:00Z | Cached proxies: 2
+      Proxy1
+      Proxy2
+Personal [proxy] trojan://PASSWORD@server.example:443#Proxy1
+   Last update: 2026-11-01T00:00:00Z | Cached proxies: 1
+```
+
+### Service control
+
+```sh
+minohomo start
+minohomo stop
+```
+
+These commands invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop mihomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
 
 ### Source names and display names
 
-Every subscription and independent proxy has a unique **source name**, used only to identify the source in `delete`, `update`, and `list`. Pass `--name` to choose it. Without that flag, minohomo assigns a random lowercase hex name of exactly six characters, such as `a3f09c`, and prints it after adding the source. Names persist across updates.
+Every subscription and independent proxy has a unique **source name**, used to identify the source in `delete`, `update`, `list`, and direct-proxy `switch` commands. Pass `--name` to choose it. Without that flag, minohomo assigns a random lowercase hex name of exactly six characters, such as `a3f09c`, and prints it after adding the source. Names persist across updates.
 
 A node's **display name** comes from its imported proxy link or subscription entry. Generated Mihomo names follow these rules:
 
