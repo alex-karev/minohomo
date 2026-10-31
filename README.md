@@ -69,11 +69,11 @@ Omit `--geosite` to preserve the system database. The helper accepts only config
 
 ```text
 minohomo init
-minohomo add <LINK>...
-minohomo add --proxy <HTTP_OR_HTTPS_PROXY_LINK>...
+minohomo add <LINK>... [--name NAME]
+minohomo add --proxy <HTTP_OR_HTTPS_PROXY_LINK>... [--name NAME]
 minohomo list
-minohomo delete <INDEX>
-minohomo update [all|_|INDEX] [--no-sync]
+minohomo delete <NAME>
+minohomo update [NAME] [--no-sync]
 minohomo geosite status
 minohomo geosite update [--url URL] [--no-reload]
 sudo minohomo apply --config PATH [--geosite PATH]
@@ -83,22 +83,22 @@ sudo minohomo apply --config PATH [--geosite PATH]
 | --- | --- |
 | `init` | Creates missing config files without overwriting existing ones. Other application commands also initialize missing files. |
 | `add` | Validates and saves links. Does not fetch subscriptions or reload Mihomo. HTTP(S) URLs mean subscriptions unless `--proxy` is supplied. |
-| `list` | Shows one-based indexes, links, last successful update times in UTC, and cached proxy counts. |
-| `delete INDEX` | Removes a source and its cache. Run `update` to apply the removal. Indexes shift after deletion. |
-| `update`, `update all`, `update _` | Refreshes all sources, generates and validates the merged config, then installs it through sudo and restarts Mihomo. |
-| `update INDEX` | Refreshes one source and regenerates using cached proxies from all other sources. Never-updated sources are omitted with a message. |
-| `update --no-sync` | Regenerates from cached proxies, validates, installs, and restarts without fetching sources. Cannot be combined with a source index. |
+| `list` | Shows unique source names, links, last successful update times in UTC, and cached proxy counts. |
+| `delete NAME` | Removes the named source and its cache. Run `update --no-sync` to apply the removal. |
+| `update` | Refreshes all sources, generates and validates the merged config, then installs it through sudo and restarts Mihomo. |
+| `update NAME` | Refreshes one source and regenerates using cached proxies from all other sources. Never-updated sources are omitted with a message. |
+| `update --no-sync` | Regenerates from cached proxies, validates, installs, and restarts without fetching sources. Cannot be combined with a source name. |
 | `apply --config PATH [--geosite PATH]` | Root-only installer used by `update`. Validates, installs to `/etc/mihomo`, and restarts the system service. |
 
 Examples:
 
 ```sh
 minohomo add 'vless://UUID@server.example:443?security=tls&sni=server.example#MyNode'
-minohomo add 'socks5://user:password@server.example:1080#Upstream'
+minohomo add 'socks5://user:password@server.example:1080#Upstream' --name Upstream
 minohomo add --proxy 'https://user:password@server.example:443#HTTPSProxy'
 minohomo list
-minohomo update 2
-minohomo delete 1
+minohomo update Upstream
+minohomo delete Upstream
 minohomo update
 ```
 
@@ -116,7 +116,7 @@ Edit the source files, not the generated Mihomo config:
 | --- | --- |
 | `~/.config/minohomo/config.yaml` | Output path, binary, reload command, request timeout, geosite URL, proxy overrides, and base Mihomo settings |
 | `~/.config/minohomo/rules.yaml` | Complete routing policy and optional rule providers |
-| `~/.config/minohomo/sources.yaml` | Saved links, stable source IDs, timestamps, and cached proxies |
+| `~/.config/minohomo/sources.yaml` | Saved links, unique source names, internal IDs, timestamps, and cached proxies |
 | `~/.config/minohomo/current.yaml` | Local generated config, passed to the privileged installer |
 | `/etc/mihomo/config.yaml` | Installed config, read by the system Mihomo daemon |
 | `~/.config/minohomo/GeoSite.dat` | Local geosite database, copied by the privileged installer |
@@ -195,7 +195,40 @@ curl -X PUT http://127.0.0.1:9090/proxies/PROXY \
   -d '{"name":"EXACT_IMPORTED_NODE_NAME"}'
 ```
 
-Imported names have a stable source prefix, such as `s1: MyNode`. Duplicate names receive a suffix. Deleting another source does not rename the remaining nodes.
+### Source names and display names
+
+Every subscription and independent proxy has a unique **source name**, used only to identify the source in `delete`, `update`, and `list`. Pass `--name` to choose it. Without that flag, minohomo assigns a random lowercase hex name of exactly six characters, such as `a3f09c`, and prints it after adding the source. Names persist across updates.
+
+A node's **display name** comes from its imported proxy link or subscription entry. Generated Mihomo names follow these rules:
+
+| Source | Source name | Node display name | Name in `current.yaml` |
+| --- | --- | --- | --- |
+| Independent proxy | `Personal` | `Proxy1` | `Proxy1` |
+| Subscription | `FooBar` | `Proxy1` | `FooBar: Proxy1` |
+| Subscription without `--name` | `a3f09c` | `Proxy1` | `a3f09c: Proxy1` |
+
+```sh
+minohomo add 'https://subscription.example/profile' --name FooBar
+minohomo add 'trojan://PASSWORD@server.example:443#Proxy1' --name Personal
+minohomo update FooBar
+minohomo delete Personal
+```
+
+`--name` changes the source name, not the independent proxy's display name. Edit the link's `#fragment` when adding a direct proxy to choose its display name. Duplicate generated display names receive a suffix to keep the Mihomo config valid.
+
+Source names must be unique. `--name` accepts one link per command; bulk adds without `--name` assign a separate random name to each source. Existing sources without names receive persistent random names on their next use. For legacy duplicate names, the first source keeps the name and later sources receive random names. minohomo prints these migration assignments.
+
+### Select sources by name
+
+Targets are always exact, case-sensitive source names. Numeric indexes are no longer supported. Quote names containing spaces:
+
+```sh
+minohomo update 'Work VPN'
+minohomo delete a3f09c
+minohomo list
+```
+
+Run `minohomo update` without a target to refresh all sources. Explicit `all`, `_`, and numeric strings are ordinary names, not special selectors. For example, `minohomo update 123456` updates the source named `123456`. `update --no-sync` regenerates the whole config and cannot take a source name.
 
 ## Geosite database
 

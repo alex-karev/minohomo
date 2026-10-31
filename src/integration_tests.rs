@@ -25,6 +25,7 @@ fn direct(id: u64, name: &str) -> Source {
         id,
         kind: SourceKind::Proxy,
         link: format!("trojan://pwd@host.test:443#{name}"),
+        name: Some(format!("source{id}")),
         added_at: Utc::now(),
         updated_at: None,
         proxies: vec![],
@@ -45,7 +46,7 @@ fn targeted_update_reuses_other_caches_and_backs_up_output() {
     store.save(&state).unwrap();
     fs::create_dir_all(output.parent().unwrap()).unwrap();
     fs::write(&output, "old config").unwrap();
-    update(&store, &mut state, Target::Index(1), false).unwrap();
+    update(&store, &mut state, Target::Name("source1".into()), false).unwrap();
     let saved = store.state().unwrap();
     assert!(saved.sources[0].updated_at.is_some());
     assert_eq!(saved.sources[1].updated_at, old_timestamp);
@@ -169,5 +170,28 @@ fn no_sync_without_cached_proxies_does_not_write_output() {
     store.save(&state).unwrap();
     assert!(update(&store, &mut state, Target::All, true).is_err());
     assert!(!output.exists());
-    assert!(update(&store, &mut state, Target::Index(1), true).is_err());
+    assert!(update(&store, &mut state, Target::Name("source1".into()), true).is_err());
+}
+
+#[test]
+fn named_update_refreshes_only_the_selected_source() {
+    let (_temp, store, output) = setup();
+    let mut cached = direct(1, "Cached");
+    cached.proxies = vec![links::parse_link(&cached.link).unwrap()];
+    cached.updated_at = Some(Utc::now() - chrono::Duration::days(1));
+    let old_timestamp = cached.updated_at;
+    cached.link = "unsupported://must-not-fetch".into();
+    let mut named = direct(2, "Fresh");
+    named.name = Some("FooBar".into());
+    let mut state = State {
+        next_id: 2,
+        sources: vec![cached, named],
+    };
+    store.save(&state).unwrap();
+    update(&store, &mut state, Target::Name("FooBar".into()), false).unwrap();
+    let saved = store.state().unwrap();
+    assert_eq!(saved.sources[0].updated_at, old_timestamp);
+    assert!(saved.sources[1].updated_at.is_some());
+    let generated: Value = storage::read_yaml(&output).unwrap();
+    assert_eq!(generated["proxies"][1]["name"], "Fresh");
 }

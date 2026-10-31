@@ -48,6 +48,9 @@ pub struct Source {
     pub id: u64,
     pub kind: SourceKind,
     pub link: String,
+    /// Unique source identifier for CLI selection, independent of node display names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub added_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -120,7 +123,27 @@ impl Store {
         Ok(())
     }
     pub fn state(&self) -> Result<State> {
-        read_yaml(&self.root.join("sources.yaml"))
+        let mut state: State = read_yaml(&self.root.join("sources.yaml"))?;
+        // Migrate older sources once; reserve all existing names before generating any.
+        let mut seen = std::collections::HashSet::new();
+        let mut changed = false;
+        for index in 0..state.sources.len() {
+            let name = state.sources[index].name.as_deref().unwrap_or("");
+            if name.trim().is_empty() || !seen.insert(name.to_owned()) {
+                let name = random_source_name(&state)?;
+                seen.insert(name.clone());
+                state.sources[index].name = Some(name.clone());
+                eprintln!(
+                    "Assigned source name '{name}' to source ID {}",
+                    state.sources[index].id
+                );
+                changed = true;
+            }
+        }
+        if changed {
+            self.save(&state)?;
+        }
+        Ok(state)
     }
     pub fn settings(&self) -> Result<Settings> {
         let mut s: Settings = read_yaml(&self.root.join("config.yaml"))?;
@@ -156,6 +179,24 @@ impl Store {
         )
     }
 }
+pub fn random_source_name(state: &State) -> Result<String> {
+    let mut random = File::open("/dev/urandom")?;
+    // Bounded retries avoid an unbounded loop if the namespace is exhausted.
+    for _ in 0..1024 {
+        let mut bytes = [0u8; 3];
+        random.read_exact(&mut bytes)?;
+        let name: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        if !state
+            .sources
+            .iter()
+            .any(|source| source.name.as_deref() == Some(&name))
+        {
+            return Ok(name);
+        }
+    }
+    anyhow::bail!("cannot allocate a unique six-character source name")
+}
+
 pub fn read_yaml<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     let mut body = String::new();
     File::open(path)
