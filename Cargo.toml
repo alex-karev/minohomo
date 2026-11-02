@@ -2,7 +2,7 @@
 name = "minohomo"
 version = "0.1.5"
 edition = "2024"
-description = "Subscription manager and Mihomo config generator"
+description = "Linux proxy client with a terminal dashboard, desktop tray, and managed Mihomo core"
 license = "GPL-3.0-only"
 
 [dependencies]
@@ -30,12 +30,11 @@ zip = { version = "2", default-features = false, features = ["deflate-flate2", "
 
 [package.metadata.deb]
 extended-description = """
-Import proxy subscriptions and direct proxy links into a per-user Mihomo config.
-Apply editable local routing rules, manage geosite data, validate generated
-configuration, and use sudo to install it for the system Mihomo service.
-Downloads and manages its own Mihomo core and system service. Subscription updates
-are manual. Run without a subcommand for an interactive terminal dashboard.
-Includes an optional desktop tray managed by a systemd user service.
+A Linux proxy client with an interactive terminal dashboard, optional desktop
+tray, and full CLI. Manage subscriptions and direct proxy links, select proxies
+and routing modes, test connections, edit routing policy, and update geosite data.
+Downloads and manages its own Mihomo core and system service with TUN support.
+Subscription updates are manual. Privileged operations use sudo or desktop polkit.
 """
 maintainer = "Alex Karev <alexkarev@sjtu.edu.cn>"
 copyright = "2026, Alex Karev <alexkarev@sjtu.edu.cn>"
@@ -52,6 +51,7 @@ assets = [
     ["src/assets/tray.png", "usr/share/icons/hicolor/150x150/apps/minohomo.png", "644"],
     ["target/release/minohomo", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/minohomo/README.md", "644"],
+    ["docs/*.md", "usr/share/doc/minohomo/docs/", "644"],
     ["defaults/config.yaml", "usr/share/doc/minohomo/defaults/config.yaml", "644"],
     ["defaults/rules.yaml", "usr/share/doc/minohomo/defaults/rules.yaml", "644"],
 ]

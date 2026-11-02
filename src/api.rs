@@ -220,6 +220,18 @@ impl Controller {
             .as_object()
             .context("Mihomo API response has no proxies map")?
             .keys()
+            .filter(|name| {
+                !matches!(
+                    name.as_str(),
+                    "GLOBAL"
+                        | "COMPATIBLE"
+                        | "PROXY"
+                        | "PASS"
+                        | "PASS-RULE"
+                        | "REJECT"
+                        | "REJECT-DROP"
+                )
+            })
             .cloned()
             .collect();
         let next = AtomicUsize::new(0);
@@ -400,7 +412,7 @@ mod tests {
             if url.path() == "/proxies" {
                 return (
                     200,
-                    json!({"proxies":{"Fast":{},"Group":{},"Slow/name x":{},"Broken":{}}}),
+                    json!({"proxies":{"Fast":{},"Group":{},"Slow/name x":{},"Broken":{},"GLOBAL":{},"COMPATIBLE":{},"PROXY":{},"PASS":{},"PASS-RULE":{},"REJECT":{},"REJECT-DROP":{}}}),
                 );
             }
             let path = percent_encoding::percent_decode_str(url.path())
