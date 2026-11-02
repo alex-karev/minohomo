@@ -1,4 +1,6 @@
 # minohomo settings. Existing files are never overwritten by init.
+# Desktop tray. Changes automatically enable/disable its systemd user service.
+tray-enabled: true
 # Relative to the minohomo config directory.
 output: current.yaml
 mihomo-binary: /usr/bin/mihomo

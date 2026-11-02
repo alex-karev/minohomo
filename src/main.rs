@@ -5,6 +5,7 @@ mod geosite;
 mod integration_tests;
 mod links;
 mod storage;
+mod tray;
 
 use anyhow::{Context, Result, ensure};
 use chrono::Utc;
@@ -38,6 +39,11 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Run the desktop tray or synchronize its systemd user service
+    Tray {
+        #[command(subcommand)]
+        command: tray::Action,
+    },
     /// Inspect or manually update the geosite database
     Geosite {
         #[command(subcommand)]
@@ -188,7 +194,18 @@ fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
     let config_dir = cli.config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
+    if let Action::Tray { command } = &cli.command {
+        return tray::run(&config_dir, command);
+    }
     let store = Store::open(&config_dir)?;
+    // Never make ordinary CLI use depend on a desktop or a user bus.
+    if unsafe { libc::geteuid() } != 0
+        && config_dir == default_config_dir()?
+        && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
+        && let Err(error) = tray::sync(&config_dir)
+    {
+        eprintln!("warning: cannot synchronize tray service: {error:#}");
+    }
     if let Action::Geosite { command } = &cli.command {
         return geosite::run(&store, command);
     }
@@ -224,7 +241,8 @@ fn run(cli: Cli) -> Result<()> {
     }
     let mut state = store.state()?;
     match cli.command {
-        Action::Geosite { .. }
+        Action::Tray { .. }
+        | Action::Geosite { .. }
         | Action::Apply { .. }
         | Action::Ping
         | Action::Mode { .. }
@@ -893,10 +911,12 @@ mod tests {
             vec!["minohomo", "switch", "Personal"],
             vec!["minohomo", "start"],
             vec!["minohomo", "stop"],
+            vec!["minohomo", "tray", "run"],
+            vec!["minohomo", "tray", "sync"],
         ] {
             assert!(Cli::try_parse_from(arguments).is_ok());
         }
-        assert!(Cli::try_parse_from(["minohomo", "mode", "global"]).is_err());
+        assert!(Cli::try_parse_from(["minohomo", "mode", "global"]).is_ok());
     }
     #[test]
     fn source_names_and_node_display_names_are_separate() {

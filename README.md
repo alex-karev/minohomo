@@ -2,7 +2,7 @@
 
 A Rust CLI that imports proxy subscriptions and direct proxy links into Mihomo. It merges proxies, applies your local routing policy, validates the generated config, and uses sudo to install the result for the system Mihomo service.
 
-Subscription updates are manual. Mihomo runs independently as the system service `mihomo.service`. minohomo does not provide a daemon or systemd unit.
+Subscription updates are manual. Mihomo runs independently as the system service `mihomo.service`. An optional desktop tray runs separately as the systemd user service `minohomo-tray.service`.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Download the `.deb` for your architecture from GitHub Releases or the **Debian p
 sudo apt install ./minohomo_*_amd64.deb
 ```
 
-The package installs `/usr/bin/minohomo`, documentation, and config templates. It does not install Mihomo, create user config files, modify your active config, or enable/start services. If you previously installed `/usr/local/bin/minohomo` manually, remove or replace that copy so it does not shadow the packaged binary.
+The package installs `/usr/bin/minohomo`, documentation, config templates, the tray icon, and systemd user units. It does not install Mihomo, create user config files, modify your active config, or enable/start services. If you previously installed `/usr/local/bin/minohomo` manually, remove or replace that copy so it does not shadow the packaged binary.
 
 ### From source
 
@@ -73,7 +73,7 @@ minohomo add <LINK>... [--name NAME]
 minohomo add --proxy <HTTP_OR_HTTPS_PROXY_LINK>... [--name NAME]
 minohomo list [--full]
 minohomo ping
-minohomo mode [rule|direct]
+minohomo mode [rule|global|direct]
 minohomo dump
 minohomo controller
 minohomo switch [PROXYNAME]
@@ -93,10 +93,11 @@ sudo minohomo apply --config PATH [--geosite PATH]
 | `list` | Shows unique source names, links, last successful update times in UTC, and cached proxy counts. |
 | `list --full` | Adds indented cached node display names below each subscription. Does not expand independent proxies or fetch anything. |
 | `ping` | Checks delays for every entry returned by Mihomo's `/proxies` API. Prints successful checks fastest first, then failed checks. |
-| `mode [rule\|direct]` | With no argument, shows the current mode from the running Mihomo API. With an argument, changes it. |
+| `mode [rule\|global\|direct]` | With no argument, shows the current mode from the running Mihomo API. With an argument, changes it. |
 | `dump` | Prints the generated `current.yaml` verbatim, without generating or applying anything. |
 | `controller` | Prints the controller URL, then `secret: SECRET` on the next line. Does not contact Mihomo. |
 | `switch [PROXYNAME]` | Selects a proxy in the `PROXY` group. With no argument, shows the current selection and available names. |
+| `tray run`, `tray sync` | Run the desktop tray, or synchronize its systemd user service with `tray-enabled`. |
 | `start`, `stop` | Uses a sudo subcommand to start or stop the system `mihomo.service`. Does not generate or install a config. |
 | `delete NAME` | Removes the named source and its cache. Run `update --no-sync` to apply the removal. |
 | `update` | Refreshes all sources, generates and validates the merged config, then installs it through sudo and restarts Mihomo. |
@@ -248,6 +249,41 @@ minohomo stop
 
 These commands invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop mihomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
 
+### Desktop tray
+
+The tray uses `src/assets/tray.png` and the desktop's StatusNotifier/AppIndicator support. KDE and compatible panels support it directly. GNOME needs an AppIndicator extension. No GTK runtime is required.
+
+```yaml
+# ~/.config/minohomo/config.yaml, top level
+tray-enabled: true
+```
+
+The preference defaults to true, including for existing config files. After installing the package, run `minohomo init` as your desktop user. Normal CLI commands in a desktop session automatically synchronize the tray service. To request synchronization explicitly:
+
+```sh
+minohomo tray sync
+```
+
+This enables and starts `minohomo-tray.service` and `minohomo-tray-config.path` for your user. The tray starts with future graphical sessions. The path unit watches `~/.config/minohomo/config.yaml`. Changing `tray-enabled` to false automatically stops and disables the tray service; changing it back to true enables and starts it again. The lightweight path watcher stays enabled while the icon is disabled so it can detect that change. Package installation itself does not enable services. Neither unit enables or disables the system Mihomo service at boot.
+
+The tray shows Mihomo's running/stopped state, current mode, and selected proxy. It refreshes every few seconds. Its menu lets you:
+
+- Switch between Rule, Global, and Direct modes.
+- Select a proxy from the running `PROXY` group, or `GLOBAL` in Global mode.
+- Enable, disable, or restart the system `mihomo.service`.
+
+Enable/disable in this menu means start/stop, not boot-time enablement. Service actions use systemctl and the desktop polkit authentication agent. Install and enable a polkit agent for your desktop; unauthorized or cancelled actions show an error in the menu and user journal. Mode and proxy changes use the authenticated Mihomo API without root access. The tray remains available when Mihomo is stopped or the API is unreachable. Runtime changes do not rewrite generated config.
+
+The tray does not hold the source-cache lock, so normal CLI updates can run alongside it. Check service errors with:
+
+```sh
+journalctl --user -u minohomo-tray.service -u minohomo-tray-config.service
+```
+
+Automatic service management uses the default profile only. To run another profile in the foreground, use `minohomo --config-dir /absolute/path tray run`. Source-only installs can run this command directly. To use the supplied user units with a source build, install the binary at `/usr/bin/minohomo`, copy `packaging/minohomo-tray*` to `~/.config/systemd/user/`, run `systemctl --user daemon-reload`, then `minohomo tray sync`.
+
+To remove all tray automation, set `tray-enabled: false`, then run `systemctl --user disable --now minohomo-tray.service minohomo-tray-config.path`. Normal desktop CLI commands will re-enable the config watcher unless you mask it with `systemctl --user mask minohomo-tray-config.path`.
+
 ### Source names and display names
 
 Every subscription and independent proxy has a unique **source name**, used to identify the source in `delete`, `update`, `list`, and direct-proxy `switch` commands. Pass `--name` to choose it. Without that flag, minohomo assigns a random lowercase hex name of exactly six characters, such as `a3f09c`, and prints it after adding the source. Names persist across updates.
@@ -358,7 +394,7 @@ cargo install cargo-deb --version '=3.7.0' --locked
 cargo deb --locked
 ```
 
-Packages are written to `target/debian/`. Configuration stays under CLI control. No systemd units or maintainer scripts are included.
+Packages are written to `target/debian/`. The package includes tray user units, not a system Mihomo unit. No maintainer scripts activate services during package installation.
 
 ## Development
 
@@ -381,7 +417,7 @@ Tests require neither root nor a running daemon.
 
 This program is vibecoded. I provided a lot of guidance for AI agent on how the program should function and the result is pretty much exactly what I wanted.
 
-In theory it should be safe to use, because its only task is to store your proxies and generate ~/.config/minohomo/current.yaml. Nothing is running in the background aside from the system Mihomo service that the user must install as a prerequisite. However, I did NOT read any code, so no warranty.
+In theory it should be safe to use, because its only task is to store your proxies and generate ~/.config/minohomo/current.yaml. The optional tray and its config watcher run in the background alongside the system Mihomo service that the user must install as a prerequisite. However, I did NOT read any code, so no warranty.
 
 ## License
 

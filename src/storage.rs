@@ -14,6 +14,8 @@ use tempfile::NamedTempFile;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default = "default_tray_enabled")]
+    pub tray_enabled: bool,
     pub output: PathBuf,
     pub mihomo_binary: PathBuf,
     #[serde(default)]
@@ -25,6 +27,9 @@ pub struct Settings {
     #[serde(default)]
     pub proxy_overrides: Proxy,
     pub mihomo: Mapping,
+}
+fn default_tray_enabled() -> bool {
+    true
 }
 fn default_geosite_url() -> String {
     "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat".into()
@@ -146,10 +151,14 @@ impl Store {
         Ok(state)
     }
     pub fn settings(&self) -> Result<Settings> {
-        let mut s: Settings = read_yaml(&self.root.join("config.yaml"))?;
+        Self::load_settings(&self.root)
+    }
+    /// Read settings without taking the source-cache lock (for the tray worker).
+    pub fn load_settings(root: &Path) -> Result<Settings> {
+        let mut s: Settings = read_yaml(&root.join("config.yaml"))?;
         // Relative outputs follow --config-dir, not the process working directory.
         if s.output.is_relative() {
-            s.output = self.root.join(&s.output);
+            s.output = root.join(&s.output);
         }
         ensure!(s.output.is_absolute(), "output must be an absolute path");
         ensure!(
@@ -157,9 +166,9 @@ impl Store {
             "request-timeout-seconds must be positive"
         );
         ensure!(
-            s.output != self.root.join("sources.yaml")
-                && s.output != self.root.join("rules.yaml")
-                && s.output != self.root.join("config.yaml"),
+            s.output != root.join("sources.yaml")
+                && s.output != root.join("rules.yaml")
+                && s.output != root.join("config.yaml"),
             "output must not overwrite minohomo's own files"
         );
         Ok(s)
@@ -271,6 +280,13 @@ mod tests {
     fn lock_prevents_concurrent_updates() {
         let dir = tempfile::tempdir().unwrap();
         let _s = Store::open(dir.path()).unwrap();
+        assert!(Store::open(dir.path()).is_err());
+    }
+    #[test]
+    fn tray_settings_can_be_read_while_cli_holds_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let _store = Store::open(dir.path()).unwrap();
+        assert!(Store::load_settings(dir.path()).unwrap().tray_enabled);
         assert!(Store::open(dir.path()).is_err());
     }
     #[test]

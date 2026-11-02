@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch Minohomo tray preference
+
+[Path]
+PathChanged=%h/.config/minohomo/config.yaml
+Unit=minohomo-tray-config.service
+
+[Install]
+WantedBy=default.target

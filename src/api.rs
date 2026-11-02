@@ -17,12 +17,14 @@ const DELAY_URL: &str = "https://www.gstatic.com/generate_204";
 pub enum Mode {
     Rule,
     Direct,
+    Global,
 }
 impl Mode {
     fn as_str(self) -> &'static str {
         match self {
             Self::Rule => "rule",
             Self::Direct => "direct",
+            Self::Global => "global",
         }
     }
 }
@@ -149,8 +151,20 @@ impl Controller {
         println!("Mihomo mode: {}", mode.as_str());
         Ok(())
     }
+    pub fn selector_group(&self, group: &str) -> Result<Value> {
+        self.request(Method::GET, self.endpoint(&["proxies", group])?, None)
+    }
     fn selector(&self) -> Result<Value> {
-        self.request(Method::GET, self.endpoint(&["proxies", "PROXY"])?, None)
+        self.selector_group("PROXY")
+    }
+    pub fn for_tray(settings: &Settings) -> Result<Self> {
+        let mut controller = Self::new(settings)?;
+        controller.client = Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        Ok(controller)
     }
     pub fn selection(&self) -> Result<()> {
         let selector = self.selector()?;
@@ -163,19 +177,22 @@ impl Controller {
         Ok(())
     }
     pub fn switch(&self, name: &str) -> Result<()> {
-        let selector = self.selector()?;
+        self.switch_group("PROXY", name)
+    }
+    pub fn switch_group(&self, group: &str, name: &str) -> Result<()> {
+        let selector = self.selector_group(group)?;
         ensure!(
             selector["all"]
                 .as_array()
                 .is_some_and(|names| names.iter().any(|n| n.as_str() == Some(name))),
-            "'{name}' is not available in the running PROXY group; apply the config with update --no-sync first"
+            "'{name}' is not available in the running {group} group; apply the config with update --no-sync first"
         );
         self.request(
             Method::PUT,
-            self.endpoint(&["proxies", "PROXY"])?,
+            self.endpoint(&["proxies", group])?,
             Some(json!({"name":name})),
         )?;
-        println!("PROXY: {name}");
+        println!("{group}: {name}");
         Ok(())
     }
     fn delay(&self, name: &str) -> Result<u64> {
@@ -337,6 +354,33 @@ mod tests {
         });
         controller.mode(Mode::Direct).unwrap();
         controller.switch("Sub: Node / One").unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn global_mode_and_selector_use_authenticated_api() {
+        let (controller, worker) = mock(3, |request, body| match request {
+            "PATCH /configs HTTP/1.1" => {
+                assert_eq!(
+                    serde_json::from_str::<Value>(body).unwrap(),
+                    json!({"mode":"global"})
+                );
+                (204, Value::Null)
+            }
+            "GET /proxies/GLOBAL HTTP/1.1" => {
+                (200, json!({"now":"DIRECT", "all":["DIRECT", "Node / One"]}))
+            }
+            "PUT /proxies/GLOBAL HTTP/1.1" => {
+                assert_eq!(
+                    serde_json::from_str::<Value>(body).unwrap(),
+                    json!({"name":"Node / One"})
+                );
+                (204, Value::Null)
+            }
+            _ => panic!("unexpected request: {request}"),
+        });
+        controller.mode(Mode::Global).unwrap();
+        controller.switch_group("GLOBAL", "Node / One").unwrap();
         worker.join().unwrap();
     }
 

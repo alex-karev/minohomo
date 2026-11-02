@@ -10,8 +10,10 @@ anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
+ksni = { version = "0.3.7", features = ["blocking"] }
 libc = "0.2"
 percent-encoding = "2"
+png = "0.17"
 prost = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "gzip", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
@@ -26,17 +28,21 @@ Import proxy subscriptions and direct proxy links into a per-user Mihomo config.
 Apply editable local routing rules, manage geosite data, validate generated
 configuration, and use sudo to install it for the system Mihomo service.
 Requires a separately installed Mihomo binary and service. Subscription updates
-are manual.
+are manual. Includes an optional desktop tray managed by a systemd user service.
 """
 maintainer = "Alex Karev <alexkarev@sjtu.edu.cn>"
 copyright = "2026, Alex Karev <alexkarev@sjtu.edu.cn>"
 license-file = ["LICENSE", "0"]
 depends = "$auto, ca-certificates, sudo"
-recommends = "systemd"
+recommends = "systemd, polkitd"
 suggests = "mihomo"
 section = "net"
 priority = "optional"
 assets = [
+    ["packaging/minohomo-tray.service", "usr/lib/systemd/user/", "644"],
+    ["packaging/minohomo-tray-config.service", "usr/lib/systemd/user/", "644"],
+    ["packaging/minohomo-tray-config.path", "usr/lib/systemd/user/", "644"],
+    ["src/assets/tray.png", "usr/share/icons/hicolor/150x150/apps/minohomo.png", "644"],
     ["target/release/minohomo", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/minohomo/README.md", "644"],
     ["defaults/config.yaml", "usr/share/doc/minohomo/defaults/config.yaml", "644"],
