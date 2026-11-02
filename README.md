@@ -61,6 +61,8 @@ Supported imports include V2Ray subscriptions and VLESS, VMess, Trojan, Shadowso
 
 ## Installation
 
+### Debian / Ubuntu
+
 Download the `.deb` for your architecture from [GitHub Releases](https://github.com/alex-karev/minohomo/releases/latest). Packages support **Debian 12 and newer**, on **amd64** and **arm64**.
 
 ```sh
@@ -68,6 +70,26 @@ Download the `.deb` for your architecture from [GitHub Releases](https://github.
 sudo apt install ./minohomo_*_amd64.deb
 # On ARM64, use the *_arm64.deb package instead.
 ```
+
+### Arch Linux
+
+Install the release `.pkg.tar.zst` package:
+
+```sh
+sudo pacman -U ./minohomo-*.pkg.tar.zst
+```
+
+Or build from the repository checkout with `makepkg -si`. Release builds target **x86_64**; the PKGBUILD also supports native **aarch64** builds on Arch Linux ARM.
+
+### NixOS
+
+Add `minohomo.url = "github:alex-karev/minohomo";` to your flake inputs and import `minohomo.nixosModules.default` in your host's modules list. Then enable the client and core service:
+
+```nix
+services.minohomo.enable = true;
+```
+
+The module installs the client and service units. The core starts at boot once you have applied your first configuration. See the [NixOS setup example](docs/development.md#nixos).
 
 Run Minohomo as your regular user. It asks for sudo authorization when installing the core, applying configuration, or controlling the system service. The core installs automatically when first needed. Installing the package alone does not start services or change your network.
 
@@ -99,7 +121,7 @@ minohomo switch 'Personal: Node name'
 
 Replace the example URL and node name with your own. `minohomo list --full` shows cached node names; `minohomo switch` lists the running choices.
 
-The core keeps running after you close the dashboard. To start it at boot after the first successful update:
+The core keeps running after you close the dashboard. On Debian or Arch, start it at boot after the first successful update:
 
 ```sh
 sudo systemctl enable minohomo.service

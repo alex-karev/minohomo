@@ -1,2 +1,8 @@
 /target/
 /.cargo-home/
+
+# Arch and Nix build outputs
+/*.pkg.tar.*
+/*.src.tar.*
+/result
+/result-*

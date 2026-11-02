@@ -1,0 +1,117 @@
+name: Arch packages
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Arch Linux / x86_64
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed rust cmake git jq ca-certificates sudo systemd
+          useradd --create-home builder
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check package version and release tag
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "minohomo") | .version')
+          package_version=$(bash -c 'source PKGBUILD; printf "%s" "$pkgver"')
+          test "$version" = "$package_version"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME must match Cargo.toml version v$version"
+            exit 1
+          fi
+
+      - name: Check formatting and Clippy
+        run: |
+          cargo fmt --all --check
+          cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Build and test Arch package
+        run: |
+          mkdir -p dist
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- env PKGDEST="$GITHUB_WORKSPACE/dist" \
+            bash -c 'cd "$GITHUB_WORKSPACE"; makepkg --noconfirm'
+
+      - name: Inspect and smoke-test package
+        run: |
+          shopt -s nullglob
+          packages=(dist/*.pkg.tar.zst)
+          test "${#packages[@]}" -eq 1
+          package="${packages[0]}"
+          pacman -Qip "$package"
+          mkdir -p build/smoke
+          bsdtar -xf "$package" -C build/smoke
+          version=$(bash -c 'source PKGBUILD; printf "%s" "$pkgver"')
+          test "$(build/smoke/usr/bin/minohomo --version)" = "minohomo $version"
+          test "$(build/smoke/usr/bin/minohomo core version)" = "Not installed"
+          test -f build/smoke/usr/lib/systemd/system/minohomo.service
+          test -f build/smoke/usr/lib/systemd/user/minohomo-tray.service
+          test -f build/smoke/usr/lib/systemd/user/minohomo-tray-config.service
+          test -f build/smoke/usr/lib/systemd/user/minohomo-tray-config.path
+          test -f build/smoke/usr/share/icons/hicolor/150x150/apps/minohomo.png
+          test ! -e build/smoke/etc
+          test ! -e build/smoke/var/lib/minohomo
+          cd dist
+          sha256sum *.pkg.tar.zst > SHA256SUMS-archlinux
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: minohomo-arch-x86_64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release packages
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Arch package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: minohomo-arch-x86_64
+          path: dist
+
+      - name: Verify checksums
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS-archlinux
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.pkg.tar.zst
+            dist/SHA256SUMS-archlinux
