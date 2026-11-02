@@ -44,6 +44,9 @@
                 --replace-fail /usr/lib/systemd/system/minohomo.service "$out/lib/systemd/system/minohomo.service"
               substituteInPlace packaging/minohomo-tray.service packaging/minohomo-tray-config.service \
                 --replace-fail /usr/bin/minohomo "$out/bin/minohomo"
+              substituteInPlace packaging/minohomo.desktop \
+                --replace-fail 'Exec=minohomo --window' "Exec=$out/bin/minohomo --window" \
+                --replace-fail 'TryExec=minohomo' "TryExec=$out/bin/minohomo"
               substituteInPlace packaging/minohomo.service \
                 --replace-fail '/bin/kill -HUP $MAINPID' '${pkgs.bash}/bin/bash -c "kill -HUP $MAINPID"'
               substituteInPlace src/apply.rs src/integration_tests.rs \
@@ -59,7 +62,8 @@
               for unit in packaging/minohomo-tray*; do
                 install -Dm644 "$unit" "$out/lib/systemd/user/$(basename "$unit")"
               done
-              install -Dm644 src/assets/tray.png "$out/share/icons/hicolor/150x150/apps/minohomo.png"
+              install -Dm644 packaging/minohomo.desktop "$out/share/applications/minohomo.desktop"
+              install -Dm644 src/assets/app.png "$out/share/icons/hicolor/256x256/apps/minohomo.png"
               mkdir -p "$out/share/doc/minohomo"
               cp -r README.md docs defaults "$out/share/doc/minohomo/"
               install -Dm644 LICENSE "$out/share/licenses/minohomo/LICENSE"

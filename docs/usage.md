@@ -12,6 +12,8 @@ minohomo
 minohomo --config-dir /absolute/path
 ```
 
+The **Minohomo** application-menu shortcut opens a new terminal using the same launcher as the tray. Run `minohomo --window` to do this from the CLI. Both respect `default_terminal` in `config.yaml`; the launcher works without the tray running.
+
 Run it as your normal user in an interactive terminal. When stdin or stdout is not a terminal, the dashboard exits with a message instead of emitting terminal control codes.
 
 The layout has three panels:
@@ -54,6 +56,7 @@ The dashboard inherits the terminal's foreground/background colors. Selection us
 ## Commands
 
 ```text
+minohomo --window
 minohomo init
 minohomo add <LINK>... [--name NAME]
 minohomo add --proxy <HTTP_OR_HTTPS_PROXY_LINK>... [--name NAME]
@@ -79,6 +82,7 @@ sudo minohomo apply --config PATH [--geosite PATH]
 
 | Command | Behavior |
 | --- | --- |
+| `--window` | Opens the dashboard in a new terminal using `default_terminal` or the system default. Used by the application-menu shortcut. |
 | `init` | Creates missing config files without overwriting existing ones. Other application commands also initialize missing files. |
 | `add` | Validates and saves links. Does not fetch subscriptions or reload Mihomo. HTTP(S) URLs mean subscriptions unless `--proxy` is supplied. |
 | `list` | Shows unique source names, links, last successful update times in UTC, and cached proxy counts. |
@@ -197,7 +201,7 @@ The tray shows Mihomo's running/stopped state, current mode, and selected proxy.
 
 - Switch between Rule, Global, and Direct modes.
 - Select a proxy from the running `PROXY` group, or `GLOBAL` in Global mode.
-- Enable, disable, or restart the system `minohomo.service`.
+- Show **Stop** while Mihomo is running, or **Start** while it is stopped. **Restart** is always available. These control the system `minohomo.service`, not its boot-enabled preference.
 - Open the terminal dashboard in your preferred terminal emulator.
 
 The **Open dashboard** menu item launches the same profile's TUI in a new terminal. Set the top-level terminal preference in `config.yaml`:

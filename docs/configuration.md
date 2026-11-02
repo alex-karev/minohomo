@@ -102,7 +102,17 @@ Clash YAML subscriptions, XHTTP, and arbitrary plugin formats are not supported.
 
 REALITY imports preserve `support-x25519mlkem768` when supplied. Mihomo has no SpiderX field, so Xray's `spx` is not mapped to a YAML option. Fingerprint behavior can differ between cores; edit `proxy-overrides` if needed.
 
-Subscription requests use `V2rayNG/1.8.12` as the User-Agent for compatibility with 3x-ui. HTTP downloads verify certificates, enforce timeouts, follow at most five redirects, and limit subscriptions to 16 MiB. Proxy environment variables apply when present in the current process.
+### Subscription User-Agent
+
+Set `subscription-user-agent` at the top level of `config.yaml`, outside `mihomo`:
+
+```yaml
+subscription-user-agent: V2rayNG/1.8.12
+```
+
+Replace the value with the User-Agent expected by your subscription provider. Existing configs without this field keep `V2rayNG/1.8.12`, the default used for compatibility with 3x-ui. Changes take effect on the next subscription fetch from either the CLI or dashboard; no apply or core restart is required. This setting does not change ping requests, core downloads, or proxy TLS fingerprints. Invalid HTTP header values are rejected before making a request.
+
+HTTP downloads verify certificates, enforce timeouts, follow at most five redirects, and limit subscriptions to 16 MiB. Proxy environment variables apply when present in the current process.
 
 ## Tray and terminal preferences
 
@@ -114,7 +124,7 @@ default_terminal: null
 # default_terminal: "konsole --separate"
 ```
 
-The tray reloads the terminal preference on each **Open dashboard** click. Null or empty selects the system default. See [desktop tray usage](usage.md#desktop-tray) for terminal detection and service controls.
+The tray reloads the terminal preference on each **Open dashboard** click. The **Minohomo** application-menu shortcut and `minohomo --window` use the same launcher and preference. Null or empty selects the system default. See [desktop tray usage](usage.md#desktop-tray) for terminal detection and service controls.
 
 ## Download mirrors
 

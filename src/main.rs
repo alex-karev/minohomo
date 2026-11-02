@@ -37,6 +37,9 @@ struct Cli {
     /// Directory containing settings, routing rules, and saved sources
     #[arg(long, global = true)]
     config_dir: Option<PathBuf>,
+    /// Open the dashboard in a new configured or system default terminal
+    #[arg(long)]
+    window: bool,
     #[command(subcommand)]
     command: Option<Action>,
 }
@@ -231,6 +234,18 @@ fn config_dir_for_home(home: &std::path::Path) -> Result<PathBuf> {
     Ok(home.join(".config/minohomo"))
 }
 fn run(cli: Cli) -> Result<()> {
+    if cli.window {
+        ensure!(
+            cli.command.is_none(),
+            "--window cannot be combined with a subcommand"
+        );
+        let root = cli.config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
+        if !root.join("config.yaml").exists() {
+            // Initialize first use, then release the lock before launching the TUI.
+            drop(Store::open(&root)?);
+        }
+        return terminal::open_dashboard(&root);
+    }
     let Some(command) = cli.command else {
         let root = cli.config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
         return tui::run(&root);
@@ -751,9 +766,11 @@ fn update(store: &Store, state: &mut State, target: Target, no_sync: bool) -> Re
     reload(&settings, "config and source cache")
 }
 fn http_client(settings: &Settings) -> Result<Client> {
+    let user_agent = reqwest::header::HeaderValue::from_str(&settings.subscription_user_agent)
+        .context("invalid subscription-user-agent")?;
     Ok(Client::builder()
         .timeout(Duration::from_secs(settings.request_timeout_seconds))
-        .user_agent("V2rayNG/1.8.12")
+        .user_agent(user_agent)
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()?)
 }
@@ -799,9 +816,48 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
     #[test]
+    fn subscription_user_agent_rejects_header_injection() {
+        let mut settings: Settings =
+            serde_yaml::from_str(include_str!("../defaults/config.yaml")).unwrap();
+        settings.subscription_user_agent = "CustomClient/2.0".into();
+        assert!(http_client(&settings).is_ok());
+        settings.subscription_user_agent = "CustomClient/2.0\r\nX-Injected: value".into();
+        assert!(
+            http_client(&settings)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid subscription-user-agent")
+        );
+    }
+
+    #[test]
     fn clap_definition() {
         Cli::command().debug_assert();
     }
+    #[test]
+    fn window_dashboard_syntax() {
+        let cli = Cli::try_parse_from(["minohomo", "--window"]).unwrap();
+        assert!(cli.window);
+        assert!(cli.command.is_none());
+        for argv in [
+            ["minohomo", "--window", "--config-dir", "/custom"],
+            ["minohomo", "--config-dir", "/custom", "--window"],
+        ] {
+            let cli = Cli::try_parse_from(argv).unwrap();
+            assert_eq!(cli.config_dir, Some(PathBuf::from("/custom")));
+            assert!(cli.window);
+            assert!(cli.command.is_none());
+        }
+        assert!(Cli::try_parse_from(["minohomo", "open"]).is_err());
+        let cli = Cli::try_parse_from(["minohomo", "--window", "init"]).unwrap();
+        assert!(
+            run(cli)
+                .unwrap_err()
+                .to_string()
+                .contains("--window cannot be combined with a subcommand")
+        );
+    }
+
     #[test]
     fn no_subcommand_selects_dashboard() {
         assert!(Cli::try_parse_from(["minohomo"]).unwrap().command.is_none());

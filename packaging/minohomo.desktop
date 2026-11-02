@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Minohomo
+Comment=Manage Mihomo proxy sources and settings
+Exec=minohomo --window
+TryExec=minohomo
+Icon=minohomo
+Terminal=false
+Categories=Network;
+Keywords=proxy;Mihomo;VPN;TUN;

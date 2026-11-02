@@ -37,6 +37,8 @@ pub struct Settings {
     #[serde(default)]
     pub reload_command: Vec<String>,
     pub request_timeout_seconds: u64,
+    #[serde(default = "default_subscription_user_agent")]
+    pub subscription_user_agent: String,
     #[serde(default = "default_ping_url")]
     pub ping_url: String,
     #[serde(default = "default_geosite_url")]
@@ -45,6 +47,9 @@ pub struct Settings {
     #[serde(default)]
     pub proxy_overrides: Proxy,
     pub mihomo: Mapping,
+}
+fn default_subscription_user_agent() -> String {
+    "V2rayNG/1.8.12".into()
 }
 fn default_ping_url() -> String {
     DEFAULT_PING_URL.into()
@@ -300,6 +305,21 @@ mod tests {
         assert!(store.root.join("rules.yaml").exists());
         assert!(store.root.join("sources.yaml").exists());
     }
+    #[test]
+    fn subscription_user_agent_defaults_and_custom_values() {
+        let mut config: Value =
+            serde_yaml::from_str(include_str!("../defaults/config.yaml")).unwrap();
+        config
+            .as_mapping_mut()
+            .unwrap()
+            .remove(key("subscription-user-agent"));
+        let settings: Settings = serde_yaml::from_value(config.clone()).unwrap();
+        assert_eq!(settings.subscription_user_agent, "V2rayNG/1.8.12");
+        config["subscription-user-agent"] = "CustomClient/2.0".into();
+        let settings: Settings = serde_yaml::from_value(config).unwrap();
+        assert_eq!(settings.subscription_user_agent, "CustomClient/2.0");
+    }
+
     #[test]
     fn relative_output_cannot_overwrite_source_files() {
         let dir = tempfile::tempdir().unwrap();

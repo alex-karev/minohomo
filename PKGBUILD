@@ -1,6 +1,6 @@
 # Maintainer: Alex Karev <alexkarev@sjtu.edu.cn>
 pkgname=minohomo
-pkgver=0.1.6
+pkgver=0.1.7
 pkgrel=1
 pkgdesc='Linux proxy client with a terminal dashboard, desktop tray, and managed Mihomo core'
 arch=('x86_64' 'aarch64')
@@ -41,7 +41,8 @@ package() {
   install -Dm644 packaging/minohomo-tray.service "$pkgdir/usr/lib/systemd/user/minohomo-tray.service"
   install -Dm644 packaging/minohomo-tray-config.service "$pkgdir/usr/lib/systemd/user/minohomo-tray-config.service"
   install -Dm644 packaging/minohomo-tray-config.path "$pkgdir/usr/lib/systemd/user/minohomo-tray-config.path"
-  install -Dm644 src/assets/tray.png "$pkgdir/usr/share/icons/hicolor/150x150/apps/minohomo.png"
+  install -Dm644 packaging/minohomo.desktop "$pkgdir/usr/share/applications/minohomo.desktop"
+  install -Dm644 src/assets/app.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/minohomo.png"
   install -Dm644 README.md "$pkgdir/usr/share/doc/minohomo/README.md"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/minohomo/LICENSE"
   install -Dm644 defaults/config.yaml "$pkgdir/usr/share/doc/minohomo/defaults/config.yaml"
