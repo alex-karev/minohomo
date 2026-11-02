@@ -110,7 +110,9 @@ jobs:
           test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray.service
           test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray-config.service
           test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray-config.path
-          test -f target/deb-smoke/usr/share/icons/hicolor/150x150/apps/minohomo.png
+          test -f target/deb-smoke/usr/share/icons/hicolor/256x256/apps/minohomo.png
+          test -f target/deb-smoke/usr/share/applications/minohomo.desktop
+          grep -qx 'Exec=minohomo --window' target/deb-smoke/usr/share/applications/minohomo.desktop
           test ! -e target/deb-smoke/etc
           test -x target/deb-smoke/usr/share/minohomo/mihomo
           target/deb-smoke/usr/share/minohomo/mihomo -v

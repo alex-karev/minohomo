@@ -124,7 +124,7 @@ default_terminal: null
 # default_terminal: "konsole --separate"
 ```
 
-The tray reloads the terminal preference on each **Open dashboard** click. Null or empty selects the system default. See [desktop tray usage](usage.md#desktop-tray) for terminal detection and service controls.
+The tray reloads the terminal preference on each **Open dashboard** click. The **Minohomo** application-menu shortcut and `minohomo --window` use the same launcher and preference. Null or empty selects the system default. See [desktop tray usage](usage.md#desktop-tray) for terminal detection and service controls.
 
 ## Download mirrors
 

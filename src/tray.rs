@@ -404,11 +404,15 @@ impl ksni::Tray for Tray {
             .into(),
             ksni::MenuItem::Separator,
         ];
-        for (text, action) in [
-            ("Enable Mihomo", "start"),
-            ("Disable Mihomo", "stop"),
-            ("Restart Mihomo", "restart"),
-        ] {
+        let service_control = if matches!(
+            self.status.service.as_str(),
+            "active" | "activating" | "reloading"
+        ) {
+            ("Stop", "stop")
+        } else {
+            ("Start", "start")
+        };
+        for (text, action) in [service_control, ("Restart", "restart")] {
             items.push(
                 StandardItem {
                     label: text.into(),
@@ -547,6 +551,49 @@ mod tests {
         );
     }
     #[test]
+    fn service_menu_tracks_running_state() {
+        for (state, expected_label, expected_action) in [
+            ("active", "Stop", "stop"),
+            ("activating", "Stop", "stop"),
+            ("reloading", "Stop", "stop"),
+            ("inactive", "Start", "start"),
+            ("failed", "Start", "start"),
+            ("deactivating", "Start", "start"),
+            ("unknown", "Start", "start"),
+        ] {
+            let (tx, rx) = mpsc::channel();
+            let mut tray = Tray {
+                status: Snapshot {
+                    service: state.into(),
+                    ..Default::default()
+                },
+                error: None,
+                tx,
+                icon: icon().unwrap(),
+            };
+            let mut menu = ksni::Tray::menu(&tray);
+            let mut controls = Vec::new();
+            for item in &mut menu {
+                if let ksni::MenuItem::Standard(item) = item
+                    && ["Start", "Stop", "Restart"].contains(&item.label.as_str())
+                {
+                    controls.push(item.label.clone());
+                    (item.activate)(&mut tray);
+                }
+            }
+            assert_eq!(controls, [expected_label, "Restart"], "state: {state}");
+            assert!(
+                matches!(rx.try_recv().unwrap(), Request::Service(action) if action == expected_action)
+            );
+            assert!(matches!(
+                rx.try_recv().unwrap(),
+                Request::Service("restart")
+            ));
+            assert!(rx.try_recv().is_err());
+        }
+    }
+
+    #[test]
     fn offline_menu_keeps_service_controls() {
         let (tx, _rx) = mpsc::channel();
         let tray = Tray {
@@ -559,7 +606,7 @@ mod tests {
             tx,
             icon: icon().unwrap(),
         };
-        assert_eq!(ksni::Tray::menu(&tray).len(), 11);
+        assert_eq!(ksni::Tray::menu(&tray).len(), 10);
     }
     #[test]
     fn synchronization_enables_watcher_and_tray() {
@@ -646,7 +693,11 @@ mod tests {
         assert!(
             matches!(rx.try_recv().unwrap(), Request::Proxy { group, name } if group == "GLOBAL" && name == "Node / One")
         );
-        if let ksni::MenuItem::Standard(item) = &mut menu[8] {
+        if let ksni::MenuItem::Standard(item) = menu
+            .iter_mut()
+            .find(|item| matches!(item, ksni::MenuItem::Standard(item) if item.label == "Restart"))
+            .expect("missing restart action")
+        {
             (item.activate)(&mut tray);
         } else {
             panic!("missing restart action");

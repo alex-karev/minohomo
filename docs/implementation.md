@@ -129,7 +129,7 @@ The dashboard requires interactive stdin/stdout. It inherits terminal colors and
 
 ## Desktop services and terminal launch
 
-The GTK-free tray uses `ksni` and StatusNotifier/AppIndicator. Its icon comes from `src/assets/tray.png`.
+The GTK-free tray uses `ksni` and StatusNotifier/AppIndicator. Its icon comes from `src/assets/tray.png`. The application-menu icon uses `src/assets/app.png`, a 256×256 PNG installed under `hicolor/256x256/apps` so desktop icon themes can find it.
 
 - `minohomo-tray.service` runs the tray as the desktop user.
 - `minohomo-tray-config.path` watches the default profile's settings.

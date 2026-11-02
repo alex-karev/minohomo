@@ -81,7 +81,9 @@ jobs:
           test -f build/smoke/usr/lib/systemd/user/minohomo-tray.service
           test -f build/smoke/usr/lib/systemd/user/minohomo-tray-config.service
           test -f build/smoke/usr/lib/systemd/user/minohomo-tray-config.path
-          test -f build/smoke/usr/share/icons/hicolor/150x150/apps/minohomo.png
+          test -f build/smoke/usr/share/icons/hicolor/256x256/apps/minohomo.png
+          test -f build/smoke/usr/share/applications/minohomo.desktop
+          grep -qx 'Exec=minohomo --window' build/smoke/usr/share/applications/minohomo.desktop
           test ! -e build/smoke/etc
           test ! -e build/smoke/var/lib/minohomo
           cd dist
