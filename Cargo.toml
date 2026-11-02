@@ -5,6 +5,10 @@ edition = "2024"
 description = "Linux proxy client with a terminal dashboard, desktop tray, and managed Mihomo core"
 license = "GPL-3.0-only"
 
+[features]
+default = ["bundled-core"]
+bundled-core = []
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
@@ -33,7 +37,7 @@ extended-description = """
 A Linux proxy client with an interactive terminal dashboard, optional desktop
 tray, and full CLI. Manage subscriptions and direct proxy links, select proxies
 and routing modes, test connections, edit routing policy, and update geosite data.
-Downloads and manages its own Mihomo core and system service with TUN support.
+Bundles and manages its own Mihomo core and system service with TUN support.
 Subscription updates are manual. Privileged operations use sudo or desktop polkit.
 """
 maintainer = "Alex Karev <alexkarev@sjtu.edu.cn>"
@@ -50,6 +54,7 @@ assets = [
     ["packaging/minohomo-tray-config.path", "usr/lib/systemd/user/", "644"],
     ["src/assets/tray.png", "usr/share/icons/hicolor/150x150/apps/minohomo.png", "644"],
     ["target/release/minohomo", "usr/bin/", "755"],
+    ["target/bundled-core/mihomo", "usr/share/minohomo/mihomo", "755"],
     ["README.md", "usr/share/doc/minohomo/README.md", "644"],
     ["docs/*.md", "usr/share/doc/minohomo/docs/", "644"],
     ["defaults/config.yaml", "usr/share/doc/minohomo/defaults/config.yaml", "644"],

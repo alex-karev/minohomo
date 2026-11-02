@@ -11,6 +11,8 @@ use std::{
 };
 use tempfile::NamedTempFile;
 
+pub(crate) const DEFAULT_PING_URL: &str = "https://www.gstatic.com/generate_204";
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Settings {
@@ -35,12 +37,17 @@ pub struct Settings {
     #[serde(default)]
     pub reload_command: Vec<String>,
     pub request_timeout_seconds: u64,
+    #[serde(default = "default_ping_url")]
+    pub ping_url: String,
     #[serde(default = "default_geosite_url")]
     pub geosite_url: String,
     /// Top-level proxy fields applied after importing each source.
     #[serde(default)]
     pub proxy_overrides: Proxy,
     pub mihomo: Mapping,
+}
+fn default_ping_url() -> String {
+    DEFAULT_PING_URL.into()
 }
 fn default_tray_enabled() -> bool {
     true

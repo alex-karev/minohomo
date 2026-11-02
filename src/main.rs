@@ -118,10 +118,10 @@ enum Action {
         /// Optional local geosite database to install alongside the config
         #[arg(long)]
         geosite: Option<PathBuf>,
-        /// Version metadata URL used if the managed core is missing
+        /// Version URL used if neither a runtime core nor a bundled core is available
         #[arg(long, default_value = core::VERSION_URL)]
         core_version_url: String,
-        /// Archive URL template used if the managed core is missing
+        /// Archive URL used if neither a runtime core nor a bundled core is available
         #[arg(long, default_value = core::DOWNLOAD_URL)]
         core_download_url: String,
     },

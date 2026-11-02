@@ -31,6 +31,10 @@ Make fixes in `~/.config/minohomo/config.yaml` or `rules.yaml`, then regenerate.
 
 ## Core download or installation fails
 
+On Debian/Arch, first-use setup prefers `/usr/share/minohomo/mihomo`. If both that bundle and `/var/lib/minohomo/mihomo` are missing, the command automatically downloads a core. If the bundle exists but cannot run, reinstall the matching architecture package or run `minohomo core update` explicitly. Source installs should also install `target/release/mihomo` at the bundle path.
+
+The steps below apply to explicit core updates and automatic missing-core downloads.
+
 The updater prints manual recovery steps with the selected endpoints and artifact name. Check connectivity to both the version endpoint and the release archive. If needed, configure a trusted [download mirror](configuration.md#download-mirrors).
 
 A download, unpack, or version-check failure leaves the installed binary unchanged. An error after the move does not roll it back. Download the archive matching your machine from [Mihomo releases](https://github.com/MetaCubeX/mihomo/releases), unpack it, then install the extracted executable:
@@ -67,7 +71,7 @@ sudo minohomo apply --config "$HOME/.config/minohomo/current.yaml" \
   --geosite "$HOME/.config/minohomo/GeoSite.dat"
 ```
 
-Omit `--geosite` if no local database exists or you want to preserve the installed copy. For mirror overrides with direct privileged apply, pass `--core-version-url URL` and `--core-download-url TEMPLATE`. The helper does not read your user settings as root.
+Omit `--geosite` if no local database exists or you want to preserve the installed copy. Packaged builds prefer the local core bundle. If both local cores are missing, privileged apply uses `--core-version-url URL` and `--core-download-url TEMPLATE` for its download fallback. The helper does not read your user settings as root.
 
 ## API unavailable or proxy not listed
 

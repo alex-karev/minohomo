@@ -50,7 +50,7 @@ Minohomo manages your proxy connections from one place. Import subscriptions or 
 
 - **Terminal dashboard:** Sources, Network, and Actions panels, live status, searchable proxy selection, and config/rules editor shortcuts. Uses your terminal's colors.
 - **Desktop tray:** switch proxies and modes, start or stop the core, and open the dashboard in your preferred terminal.
-- **Managed Mihomo core:** download and update the core from the client. No separate Mihomo installation required.
+- **Bundled Mihomo core:** Debian and Arch packages include the core. First use installs a local copy, downloading one only if no local core is available. Update it explicitly from the client. No separate Mihomo installation required.
 - **System-wide TUN:** route traffic through Mihomo, with local HTTP and SOCKS5 listeners for apps that use an explicit proxy.
 - **Source management:** named subscriptions and direct links, cached nodes, selective updates, renaming, and removal. Subscriptions refresh when you request it.
 - **Network checks:** proxy delay results sorted fastest first, plus an on-demand public IP and location lookup.
@@ -91,7 +91,7 @@ services.minohomo.enable = true;
 
 The module installs the client and service units. The core starts at boot once you have applied your first configuration. See the [NixOS setup example](docs/development.md#nixos).
 
-Run Minohomo as your regular user. It asks for sudo authorization when installing the core, applying configuration, or controlling the system service. The core installs automatically when first needed. Installing the package alone does not start services or change your network.
+Run Minohomo as your regular user. It asks for sudo authorization when installing the core, applying configuration, or controlling the system service. Debian and Arch packages include the core at `/usr/share/minohomo/mihomo`. First use copies it into `/var/lib/minohomo`. If both runtime and bundled cores are missing, Minohomo downloads one automatically. `minohomo core update` and the dashboard core-update action explicitly download a replacement. NixOS keeps its separate, non-bundled workflow. Installing the package alone does not start services or change your network.
 
 The desktop tray needs StatusNotifier/AppIndicator support. KDE supports it directly; GNOME needs a compatible AppIndicator extension. A desktop polkit agent handles authorization for tray service controls.
 
@@ -106,7 +106,7 @@ minohomo
 ```
 
 1. In **Sources**, press `a` to add a subscription URL or direct proxy link. Give it a name if you want.
-2. Press `U` to update all sources. Minohomo installs a missing core, validates your settings, applies them, and starts the service. Expect a sudo prompt.
+2. Press `U` to update all sources. Minohomo installs the bundled core if needed, validates your settings, applies them, and starts the service. Expect a sudo prompt.
 3. Press `x` to choose a proxy, or `m` to switch between Rule, Global, and Direct modes.
 4. Open **Network** to test delays with `p` or look up your public IP with `i`.
 

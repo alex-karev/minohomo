@@ -7,8 +7,10 @@ tray-enabled: true
 default_terminal: null
 # Relative to the minohomo config directory.
 output: current.yaml
-# Managed core; no separate Mihomo package is required.
+# Runtime core. Debian/Arch copy the bundled core here on first use.
+# If both runtime and bundled cores are missing, download a core automatically.
 mihomo-binary: /var/lib/minohomo/mihomo
+# Endpoints for explicit core updates and missing-core download fallback.
 core-version-url: https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt
 # Placeholders: {version}, {artifact}, {ext}. Change for an archive mirror.
 core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{version}/{artifact}-{version}.{ext}
@@ -16,6 +18,8 @@ core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{versio
 # Nonempty overrides deployment with a custom command, run as your current user.
 reload-command: []
 request-timeout-seconds: 45
+# HTTP(S) URL used by CLI and dashboard delay checks.
+ping-url: https://www.gstatic.com/generate_204
 # Change this URL to use another geosite database or mirror.
 # minohomo geosite update --url URL overrides it for one download.
 geosite-url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat

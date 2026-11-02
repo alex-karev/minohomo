@@ -17,6 +17,7 @@ use std::{
 
 pub const DIRECTORY: &str = "/var/lib/minohomo";
 pub const BINARY: &str = "/var/lib/minohomo/mihomo";
+pub const BUNDLED_BINARY: &str = "/usr/share/minohomo/mihomo";
 pub const SERVICE: &str = "minohomo.service";
 pub const VERSION_URL: &str =
     "https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt";
@@ -231,7 +232,7 @@ pub fn ensure_local(settings: &Settings) -> Result<()> {
     }
     if !Path::new(BINARY).is_file() {
         println!("Managed core is not installed; installing it first...");
-        update(&settings.core_version_url, &settings.core_download_url)?;
+        ensure_root(&settings.core_version_url, &settings.core_download_url)?;
     }
     Ok(())
 }
@@ -241,9 +242,41 @@ pub fn update(version_url: &str, download_url: &str) -> Result<()> {
 
 pub fn ensure_root(version_url: &str, download_url: &str) -> Result<()> {
     if !Path::new(BINARY).is_file() {
-        update(version_url, download_url)?;
+        if cfg!(feature = "bundled-core") && Path::new(BUNDLED_BINARY).is_file() {
+            install_bundled()?;
+        } else {
+            println!("No local Mihomo core is available; downloading it first...");
+            update(version_url, download_url)?;
+        }
     }
     ensure_service()
+}
+
+fn install_bundled() -> Result<()> {
+    ensure!(
+        Path::new(BUNDLED_BINARY).is_file(),
+        "bundled Mihomo core disappeared from {BUNDLED_BINARY}; retry or run 'minohomo core update'"
+    );
+    let version = version_at(Path::new(BUNDLED_BINARY))
+        .context("bundled Mihomo core cannot run; reinstall the matching architecture package or run 'minohomo core update'")?;
+    privileged(
+        "/usr/bin/install",
+        &[
+            OsStr::new("-D"),
+            OsStr::new("-m"),
+            OsStr::new("755"),
+            OsStr::new("-o"),
+            OsStr::new("root"),
+            OsStr::new("-g"),
+            OsStr::new("root"),
+            OsStr::new("--"),
+            OsStr::new(BUNDLED_BINARY),
+            OsStr::new(BINARY),
+        ],
+    )
+    .context("cannot copy bundled Mihomo core; retry with sudo authorization, reinstall the package, or run 'minohomo core update'")?;
+    println!("Installed bundled Mihomo {version} at {BINARY}.");
+    Ok(())
 }
 
 pub struct RuntimeLock(File);

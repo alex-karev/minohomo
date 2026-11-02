@@ -6,8 +6,10 @@ pkgdesc='Linux proxy client with a terminal dashboard, desktop tray, and managed
 arch=('x86_64' 'aarch64')
 url='https://github.com/alex-karev/minohomo'
 license=('GPL-3.0-only')
+# AWS-LC's GCC LTO objects cannot be linked by Rust's LLVM linker.
+options=('!lto')
 depends=('glibc' 'gcc-libs' 'ca-certificates' 'sudo' 'systemd')
-makedepends=('cargo' 'cmake')
+makedepends=('cargo' 'cmake' 'curl' 'gzip')
 optdepends=(
   'polkit: desktop authorization for tray service controls'
   'xdg-terminal-exec: open the dashboard in the desktop default terminal'
@@ -34,6 +36,7 @@ check() {
 package() {
   cd "$startdir"
   install -Dm755 "target/$CARCH-unknown-linux-gnu/release/minohomo" "$pkgdir/usr/bin/minohomo"
+  install -Dm755 "target/$CARCH-unknown-linux-gnu/release/mihomo" "$pkgdir/usr/share/minohomo/mihomo"
   install -Dm644 packaging/minohomo.service "$pkgdir/usr/lib/systemd/system/minohomo.service"
   install -Dm644 packaging/minohomo-tray.service "$pkgdir/usr/lib/systemd/user/minohomo-tray.service"
   install -Dm644 packaging/minohomo-tray-config.service "$pkgdir/usr/lib/systemd/user/minohomo-tray-config.service"

@@ -21,7 +21,8 @@ Mihomo runs independently as the global `minohomo.service`. Closing the dashboar
 | `~/.config/minohomo/sources.yaml` | Saved links, IDs, names, timestamps, and cached nodes |
 | `~/.config/minohomo/current.yaml` | Local generated config for validation and deployment |
 | `~/.config/minohomo/GeoSite.dat` | Local geosite database |
-| `/var/lib/minohomo/mihomo` | Managed executable |
+| `/usr/share/minohomo/mihomo` | Package-owned bundled core (Debian/Arch) |
+| `/var/lib/minohomo/mihomo` | Managed runtime executable |
 | `/var/lib/minohomo/config.yaml` | Active runtime configuration |
 | `/var/lib/minohomo/` | Runtime geodata and other Mihomo data |
 | `/usr/lib/systemd/system/minohomo.service` | Global core unit |
@@ -38,7 +39,7 @@ An `update` operation:
 1. Fetches the selected subscription sources or parses direct links.
 2. Combines fresh proxies with cached proxies from other sources.
 3. Applies local proxy overrides, groups, and routing policy.
-4. Installs a missing managed core, then validates the candidate as the current user.
+4. Copies the bundled core if the runtime executable is missing, or downloads one if both local copies are missing, then validates the candidate as the current user.
 5. Saves the new local config and source state, keeping `current.yaml.bak` when replacing a config.
 6. Invokes the same Minohomo executable through sudo with `apply`, unless a custom `reload-command` overrides deployment.
 
@@ -58,7 +59,7 @@ sudo minohomo apply --config /path/to/current.yaml --geosite /path/to/GeoSite.da
 
 The geosite argument is optional. The real invocation uses the current executable's path, not a shell command resolved from the user's settings.
 
-The root helper does not load user settings or initialize root's profile. It accepts input paths and optional core download endpoints; the destination directory, managed validator, and service name are fixed.
+The root helper does not load user settings or initialize root's profile. It accepts input paths and optional core download endpoints for non-bundled builds; the destination directory, managed validator, and service name are fixed.
 
 The helper:
 
@@ -71,11 +72,19 @@ The helper:
 
 System validation failure leaves the installed config and database unchanged. A restart failure leaves the new config installed and reports the error. Replacement files use temporary files and rename; this is not a single transaction across all files or the service restart.
 
-Direct privileged apply uses built-in download endpoints unless given `--core-version-url URL` and `--core-download-url TEMPLATE`. Normal updates forward the configured endpoints explicitly.
+Packaged builds copy `/usr/share/minohomo/mihomo` when the runtime core is missing. If both local copies are missing, apply downloads a core using `--core-version-url` and `--core-download-url`. Normal updates forward configured endpoints to privileged apply. Direct start/stop/restart fallback uses the built-in endpoints.
 
 Treat apply as a privileged networking operation. Do not grant restricted passwordless sudo access on the assumption that arbitrary user-provided Mihomo configs are harmless. The unit runs as root with the capability settings in [packaging/minohomo.service](../packaging/minohomo.service).
 
-## Managed core updates
+## Bundled core and explicit updates
+
+The default `bundled-core` feature downloads a pinned, SHA-256-checked release at compile time. It selects Cargo's target OS/architecture and uses `amd64-v1` for x86-64, regardless of the build machine's CPU features. The build caches the unpacked executable under `target/bundled-core/cache/`, keyed by target triple, pinned version, and archive checksum. This cache is shared across build profiles and build-script fingerprints. Debian and Arch install the resulting executable at `/usr/share/minohomo/mihomo`, mode 755. Compilation never runs the downloaded target executable, so cross-builds do not require emulation.
+
+On first `update`, `apply`, `start`, `stop`, or `restart`, the client copies the bundle into `/var/lib/minohomo/mihomo` using privileged `install -D -m 755 -o root -g root`. It leaves the packaged copy untouched. If a runtime core already exists, it is preserved, including across Minohomo package upgrades. If both the runtime core and bundle are missing, the command runs the existing core updater automatically. An existing but unusable bundle still produces an error recommending package reinstallation or an explicit core update.
+
+CLI/dashboard service controls use this setup path. First-use tray controls invoke the same copy-or-download setup through the root CLI using polkit's `pkexec`; later tray controls use systemctl as before. Starting the service still requires an applied configuration.
+
+The Nix flake disables the default feature and keeps the existing download-on-first-use behavior. The rest of this section describes explicit core updates, which are unchanged in both builds.
 
 `core version` queries only `/var/lib/minohomo/mihomo`. If it is absent, the command prints exactly `Not installed`. It does not initialize a profile or query a separate system installation.
 
@@ -106,7 +115,7 @@ The default controller is `127.0.0.1:9090`. Initialization creates a random secr
 
 Mode changes and proxy selection use the authenticated API, not config rewriting or service restarts. Persistent proxy selection follows Mihomo's `profile.store-selected`. A config reload can reset the mode to `mihomo.mode`.
 
-Ping is an HTTP delay check through Mihomo, not ICMP. Checks request `https://www.gstatic.com/generate_204`, with a five-second per-entry timeout and up to eight concurrent checks. Results use running API names, sort successful checks fastest first, and place failures last. The client excludes `GLOBAL`, `COMPATIBLE`, `PROXY`, `PASS`, `PASS-RULE`, `REJECT`, and `REJECT-DROP` before issuing checks. `DIRECT` and custom groups remain eligible.
+Ping is an HTTP delay check through Mihomo, not ICMP. Checks use the configured top-level `ping-url`, defaulting to `https://www.gstatic.com/generate_204`, with a five-second per-entry timeout and up to eight concurrent checks. Results use running API names, sort successful checks fastest first, and place failures last. The client excludes `GLOBAL`, `COMPATIBLE`, `PROXY`, `PASS`, `PASS-RULE`, `REJECT`, and `REJECT-DROP` before issuing checks. `DIRECT` and custom groups remain eligible.
 
 The optional public IP lookup contacts `https://ipwho.is/` only on request. It follows the process's outbound routing and proxy environment. The result is not proof that Mihomo handled the request. Failed requests preserve the last successful result in the dashboard.
 

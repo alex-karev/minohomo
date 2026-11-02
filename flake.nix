@@ -18,11 +18,14 @@
             src = lib.fileset.toSource {
               root = ./.;
               fileset = lib.fileset.unions [
-                ./Cargo.toml ./Cargo.lock ./src ./defaults ./packaging
+                ./Cargo.toml ./Cargo.lock ./build.rs ./src ./defaults ./packaging
                 ./README.md ./docs ./LICENSE
               ];
             };
             cargoLock.lockFile = ./Cargo.lock;
+            # Nix builds stay offline and retain the non-bundled core workflow.
+            buildNoDefaultFeatures = true;
+            checkNoDefaultFeatures = true;
             nativeBuildInputs = [ pkgs.cmake pkgs.pkg-config ];
 
             # NixOS has no /usr/bin tools. Keep sudo's setuid wrapper intact.
