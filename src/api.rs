@@ -11,7 +11,6 @@ use std::{
 use url::Url;
 
 const DELAY_TIMEOUT_MS: u64 = 5000;
-const DELAY_URL: &str = "https://www.gstatic.com/generate_204";
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Mode {
@@ -33,6 +32,7 @@ pub struct Controller {
     client: Client,
     base: Url,
     secret: String,
+    ping_url: String,
 }
 impl Controller {
     pub fn new(settings: &Settings) -> Result<Self> {
@@ -72,6 +72,11 @@ impl Controller {
             .and_then(serde_yaml::Value::as_str)
             .unwrap_or("")
             .to_owned();
+        let ping_url = Url::parse(&settings.ping_url).context("invalid ping-url")?;
+        ensure!(
+            ["http", "https"].contains(&ping_url.scheme()) && ping_url.host_str().is_some(),
+            "ping-url must use HTTP(S) and include a host"
+        );
         let client = Client::builder()
             .no_proxy()
             .timeout(Duration::from_secs(settings.request_timeout_seconds.max(6)))
@@ -81,6 +86,7 @@ impl Controller {
             client,
             base,
             secret,
+            ping_url: ping_url.to_string(),
         })
     }
     fn endpoint(&self, segments: &[&str]) -> Result<Url> {
@@ -207,7 +213,7 @@ impl Controller {
         let mut url = self.endpoint(&["proxies", name, "delay"])?;
         url.query_pairs_mut()
             .append_pair("timeout", &DELAY_TIMEOUT_MS.to_string())
-            .append_pair("url", DELAY_URL);
+            .append_pair("url", &self.ping_url);
         let result = self.request(Method::GET, url, None)?;
         result["delay"]
             .as_u64()
@@ -346,6 +352,7 @@ mod tests {
                 .unwrap(),
             base: Url::parse(&format!("http://{address}/")).unwrap(),
             secret: "test-secret".into(),
+            ping_url: storage::DEFAULT_PING_URL.into(),
         };
         (controller, worker)
     }
@@ -422,7 +429,10 @@ mod tests {
                 url.query_pairs()
                     .any(|(k, v)| k == "timeout" && v == "5000")
             );
-            assert!(url.query_pairs().any(|(k, v)| k == "url" && v == DELAY_URL));
+            assert!(
+                url.query_pairs()
+                    .any(|(k, v)| k == "url" && v == storage::DEFAULT_PING_URL)
+            );
             match path.as_ref() {
                 "/proxies/Fast/delay" => (200, json!({"delay":10})),
                 "/proxies/Group/delay" => (200, json!({"delay":20})),
@@ -459,6 +469,7 @@ mod tests {
             client: Client::builder().no_proxy().build().unwrap(),
             base: Url::parse("http://localhost:9090/").unwrap(),
             secret: "example-secret".into(),
+            ping_url: storage::DEFAULT_PING_URL.into(),
         };
         assert_eq!(
             controller.info(),

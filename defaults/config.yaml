@@ -16,6 +16,8 @@ core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{versio
 # Nonempty overrides deployment with a custom command, run as your current user.
 reload-command: []
 request-timeout-seconds: 45
+# HTTP(S) URL used by CLI and dashboard delay checks.
+ping-url: https://www.gstatic.com/generate_204
 # Change this URL to use another geosite database or mirror.
 # minohomo geosite update --url URL overrides it for one download.
 geosite-url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat

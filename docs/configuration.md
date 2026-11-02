@@ -34,6 +34,21 @@ editor ~/.config/minohomo/config.yaml
 
 `init` and application upgrades do not overwrite your settings. See [defaults/config.yaml](../defaults/config.yaml) for the current template. After editing settings, run `minohomo update --no-sync` to apply them using cached nodes. Config edits do not require a binary reinstall.
 
+### Ping check URL
+
+Set `ping-url` at the top level of `config.yaml`, outside `mihomo`:
+
+```yaml
+ping-url: https://cp.cloudflare.com/generate_204
+
+mihomo:
+  # Your existing core settings.
+```
+
+This controls `minohomo ping` and dashboard delay checks. The default is `https://www.gstatic.com/generate_204`. Use an HTTP(S) endpoint with a small response, preferably a `generate_204` endpoint. These checks measure HTTP connection delay through each proxy, not ICMP ping.
+
+Changes take effect on the next ping check. No apply or core restart is needed. Existing configs without this field keep the default URL. Mihomo proxy-group `url` settings control group health checks, not these API requests.
+
 ### Routing rules
 
 ```sh
