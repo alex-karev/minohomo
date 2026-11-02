@@ -100,6 +100,12 @@ jobs:
           version=$(cargo metadata --locked --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "minohomo") | .version')
           test "$(target/deb-smoke/usr/bin/minohomo --version)" = "minohomo $version"
+          # Bare invocation must fail cleanly in noninteractive scripts, not hang.
+          if output=$(target/deb-smoke/usr/bin/minohomo </dev/null 2>&1); then
+            echo "::error::Dashboard unexpectedly started without a terminal"
+            exit 1
+          fi
+          [[ "$output" == *"dashboard needs an interactive terminal"* ]]
           # Installing the package must not configure or activate the daemon.
           test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray.service
           test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray-config.service

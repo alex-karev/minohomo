@@ -143,12 +143,16 @@ impl Controller {
             .context("Mihomo API response has no mode")
     }
     pub fn mode(&self, mode: Mode) -> Result<()> {
+        self.set_mode(mode)?;
+        println!("Mihomo mode: {}", mode.as_str());
+        Ok(())
+    }
+    pub fn set_mode(&self, mode: Mode) -> Result<()> {
         self.request(
             Method::PATCH,
             self.endpoint(&["configs"])?,
             Some(json!({"mode":mode.as_str()})),
         )?;
-        println!("Mihomo mode: {}", mode.as_str());
         Ok(())
     }
     pub fn selector_group(&self, group: &str) -> Result<Value> {
@@ -180,6 +184,11 @@ impl Controller {
         self.switch_group("PROXY", name)
     }
     pub fn switch_group(&self, group: &str, name: &str) -> Result<()> {
+        self.set_selection(group, name)?;
+        println!("{group}: {name}");
+        Ok(())
+    }
+    pub fn set_selection(&self, group: &str, name: &str) -> Result<()> {
         let selector = self.selector_group(group)?;
         ensure!(
             selector["all"]
@@ -192,7 +201,6 @@ impl Controller {
             self.endpoint(&["proxies", group])?,
             Some(json!({"name":name})),
         )?;
-        println!("{group}: {name}");
         Ok(())
     }
     fn delay(&self, name: &str) -> Result<u64> {
@@ -206,7 +214,7 @@ impl Controller {
             .filter(|delay| *delay > 0)
             .context("delay check failed")
     }
-    fn delays(&self) -> Result<Vec<(String, Option<u64>)>> {
+    pub fn delays(&self) -> Result<Vec<(String, Option<u64>)>> {
         let proxies = self.proxies()?;
         let names: Vec<_> = proxies["proxies"]
             .as_object()

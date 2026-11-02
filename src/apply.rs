@@ -41,7 +41,7 @@ pub fn service(action: &str) -> Result<()> {
         "service control requires root; run it with sudo"
     );
     ensure!(
-        ["start", "stop"].contains(&action),
+        ["start", "stop", "restart"].contains(&action),
         "unsupported service action"
     );
     let status = Command::new("/usr/bin/systemctl")

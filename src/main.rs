@@ -5,7 +5,9 @@ mod geosite;
 mod integration_tests;
 mod links;
 mod storage;
+mod terminal;
 mod tray;
+mod tui;
 
 use anyhow::{Context, Result, ensure};
 use chrono::Utc;
@@ -28,14 +30,14 @@ const MAX_BODY: u64 = 16 * 1024 * 1024;
 #[command(
     name = "minohomo",
     version,
-    about = "Manage proxy sources and regenerate Mihomo config."
+    about = "Manage Mihomo sources and config. No subcommand opens the terminal dashboard."
 )]
 struct Cli {
     /// Directory containing settings, routing rules, and saved sources
     #[arg(long, global = true)]
     config_dir: Option<PathBuf>,
     #[command(subcommand)]
-    command: Action,
+    command: Option<Action>,
 }
 #[derive(Subcommand)]
 enum Action {
@@ -85,11 +87,22 @@ enum Action {
     Start,
     /// Stop the system Mihomo service through sudo
     Stop,
+    /// Restart the system Mihomo service through sudo
+    Restart,
     /// Remove a source and its cache; run update afterward to apply to Mihomo
     Delete {
         /// Exact source name
         #[arg(value_parser = parse_source_target)]
         target: Target,
+    },
+    /// Rename a saved source; omit the new name to enter it at a prompt
+    Rename {
+        /// Exact source name, using the same selector as delete
+        #[arg(value_parser = parse_source_target)]
+        target: Target,
+        /// New unique source name
+        #[arg(value_parser = parse_source_name)]
+        new_name: Option<String>,
     },
     /// Install a generated config into /etc/mihomo and restart the system service (root)
     Apply {
@@ -146,6 +159,39 @@ fn parse_source_name(value: &str) -> std::result::Result<String, String> {
     }
     Ok(value.to_owned())
 }
+fn prompt_source_name(
+    input: &mut impl std::io::BufRead,
+    output: &mut impl std::io::Write,
+) -> Result<String> {
+    write!(output, "New source name: ")?;
+    output.flush()?;
+    let mut name = String::new();
+    ensure!(
+        input
+            .read_line(&mut name)
+            .context("cannot read new source name")?
+            > 0,
+        "no new name received; source was not renamed"
+    );
+    parse_source_name(&name).map_err(anyhow::Error::msg)
+}
+fn rename_source(state: &mut State, index: usize, new_name: &str) -> Result<String> {
+    let new_name = parse_source_name(new_name).map_err(anyhow::Error::msg)?;
+    ensure!(
+        !state
+            .sources
+            .iter()
+            .enumerate()
+            .any(|(i, source)| i != index && source.name.as_deref() == Some(&new_name)),
+        "source name '{new_name}' is already in use"
+    );
+    let old_name = state.sources[index]
+        .name
+        .clone()
+        .context("source has no name")?;
+    state.sources[index].name = Some(new_name);
+    Ok(old_name)
+}
 fn main() -> ExitCode {
     let cli = Cli::parse();
     // Source caches and generated configs contain authentication secrets.
@@ -173,15 +219,24 @@ fn config_dir_for_home(home: &std::path::Path) -> Result<PathBuf> {
     Ok(home.join(".config/minohomo"))
 }
 fn run(cli: Cli) -> Result<()> {
+    let Some(command) = cli.command else {
+        let root = cli.config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
+        return tui::run(&root);
+    };
+    run_action(cli.config_dir, command)
+}
+fn run_action(config_dir: Option<PathBuf>, command: Action) -> Result<()> {
     // The privileged installer never loads user settings or initializes root's config.
-    if let Action::Apply { config, geosite } = &cli.command {
+    if let Action::Apply { config, geosite } = &command {
         return apply::run(config, geosite.as_deref());
     }
-    if matches!(cli.command, Action::Start | Action::Stop) {
-        let action = if matches!(cli.command, Action::Start) {
+    if matches!(command, Action::Start | Action::Stop | Action::Restart) {
+        let action = if matches!(command, Action::Start) {
             "start"
-        } else {
+        } else if matches!(command, Action::Stop) {
             "stop"
+        } else {
+            "restart"
         };
         if unsafe { libc::geteuid() } == 0 {
             return apply::service(action);
@@ -193,8 +248,8 @@ fn run(cli: Cli) -> Result<()> {
         ensure!(status.success(), "Mihomo {action} failed");
         return Ok(());
     }
-    let config_dir = cli.config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
-    if let Action::Tray { command } = &cli.command {
+    let config_dir = config_dir.map(Ok).unwrap_or_else(default_config_dir)?;
+    if let Action::Tray { command } = &command {
         return tray::run(&config_dir, command);
     }
     let store = Store::open(&config_dir)?;
@@ -206,10 +261,10 @@ fn run(cli: Cli) -> Result<()> {
     {
         eprintln!("warning: cannot synchronize tray service: {error:#}");
     }
-    if let Action::Geosite { command } = &cli.command {
+    if let Action::Geosite { command } = &command {
         return geosite::run(&store, command);
     }
-    match &cli.command {
+    match &command {
         Action::Ping => return api::Controller::new(&store.settings()?)?.ping(),
         Action::Mode { mode } => {
             let controller = api::Controller::new(&store.settings()?)?;
@@ -240,7 +295,7 @@ fn run(cli: Cli) -> Result<()> {
         _ => {}
     }
     let mut state = store.state()?;
-    match cli.command {
+    match command {
         Action::Tray { .. }
         | Action::Geosite { .. }
         | Action::Apply { .. }
@@ -250,7 +305,8 @@ fn run(cli: Cli) -> Result<()> {
         | Action::Controller
         | Action::Switch { .. }
         | Action::Start
-        | Action::Stop => unreachable!(),
+        | Action::Stop
+        | Action::Restart => unreachable!(),
         Action::Init => println!("Config files ready in {}", store.root.display()),
         Action::List { full } => print!("{}", format_list(&state, full)?),
         Action::Add { links, proxy, name } => {
@@ -292,6 +348,27 @@ fn run(cli: Cli) -> Result<()> {
             }
             store.save(&state)?;
             println!("Saved. Run 'minohomo update' to fetch sources and apply the config.");
+        }
+        Action::Rename { target, new_name } => {
+            let index = resolve_source(&target, &state)?;
+            let new_name = match new_name {
+                Some(name) => name,
+                None => {
+                    prompt_source_name(&mut std::io::stdin().lock(), &mut std::io::stderr().lock())?
+                }
+            };
+            let old_name = rename_source(&mut state, index, &new_name)?;
+            if old_name == new_name {
+                println!("Source is already named '{new_name}'.");
+            } else {
+                store.save(&state)?;
+                println!(
+                    "Renamed '{old_name}' to '{new_name}'. Cache and timestamps are unchanged."
+                );
+                println!(
+                    "Active Mihomo config is unchanged. Run 'minohomo update --no-sync' to apply generated subscription name changes."
+                );
+            }
         }
         Action::Delete { target } => {
             let index = resolve_source(&target, &state)?;
@@ -661,6 +738,13 @@ mod tests {
         Cli::command().debug_assert();
     }
     #[test]
+    fn no_subcommand_selects_dashboard() {
+        assert!(Cli::try_parse_from(["minohomo"]).unwrap().command.is_none());
+        let cli = Cli::try_parse_from(["minohomo", "--config-dir", "/custom"]).unwrap();
+        assert!(cli.command.is_none());
+        assert_eq!(cli.config_dir, Some(PathBuf::from("/custom")));
+    }
+    #[test]
     fn user_config_directory() {
         assert_eq!(
             config_dir_for_home(std::path::Path::new("/home/test")).unwrap(),
@@ -911,6 +995,9 @@ mod tests {
             vec!["minohomo", "switch", "Personal"],
             vec!["minohomo", "start"],
             vec!["minohomo", "stop"],
+            vec!["minohomo", "restart"],
+            vec!["minohomo", "tray", "enable"],
+            vec!["minohomo", "tray", "disable"],
             vec!["minohomo", "tray", "run"],
             vec!["minohomo", "tray", "sync"],
         ] {
@@ -1038,7 +1125,7 @@ mod tests {
         for name in ["0", "1", "123456", "all", "_", "FooBar"] {
             let cli = Cli::try_parse_from(["minohomo", "update", name]).unwrap();
             assert!(
-                matches!(cli.command, Action::Update { target: Some(Target::Name(value)), .. } if value == name)
+                matches!(cli.command, Some(Action::Update { target: Some(Target::Name(value)), .. }) if value == name)
             );
             let mut named = source(9);
             named.name = Some(name.into());
@@ -1052,7 +1139,10 @@ mod tests {
             );
         }
         let cli = Cli::try_parse_from(["minohomo", "update"]).unwrap();
-        assert!(matches!(cli.command, Action::Update { target: None, .. }));
+        assert!(matches!(
+            cli.command,
+            Some(Action::Update { target: None, .. })
+        ));
     }
     #[test]
     fn named_bulk_add_is_rejected_without_saving() {
@@ -1288,5 +1378,118 @@ mod tests {
             SourceKind::Proxy
         );
         assert!(classify("file:///etc/shadow", false).is_err());
+    }
+    #[test]
+    fn rename_syntax_uses_delete_selectors_and_optional_new_name() {
+        for name in ["Personal", "1", "all", "_"] {
+            let cli = Cli::try_parse_from(["minohomo", "rename", name]).unwrap();
+            assert!(
+                matches!(cli.command, Some(Action::Rename {target: Target::Name(target), new_name: None}) if target == name)
+            );
+        }
+        assert!(Cli::try_parse_from(["minohomo", "rename"]).is_err());
+        assert!(Cli::try_parse_from(["minohomo", "rename", "Old", " "]).is_err());
+        let cli = Cli::try_parse_from(["minohomo", "rename", "--", "--old", "--new"]).unwrap();
+        assert!(
+            matches!(cli.command, Some(Action::Rename {target: Target::Name(target), new_name: Some(name)}) if target == "--old" && name == "--new")
+        );
+    }
+    #[test]
+    fn rename_preserves_everything_except_source_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = source(1);
+        first.kind = SourceKind::Subscription;
+        first.name = Some("1".into());
+        let original = State {
+            next_id: 2,
+            sources: vec![first, source(2)],
+        };
+        {
+            let store = Store::open(dir.path()).unwrap();
+            store.save(&original).unwrap();
+        }
+        let config = std::fs::read(dir.path().join("config.yaml")).unwrap();
+        std::fs::write(
+            dir.path().join("current.yaml"),
+            "unchanged generated config",
+        )
+        .unwrap();
+        run_action(
+            Some(dir.path().into()),
+            Action::Rename {
+                target: Target::Name("1".into()),
+                new_name: Some("New source".into()),
+            },
+        )
+        .unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let renamed = store.state().unwrap();
+        let mut expected = serde_json::to_value(original).unwrap();
+        expected["sources"][0]["name"] = "New source".into();
+        assert_eq!(serde_json::to_value(renamed).unwrap(), expected);
+        assert_eq!(
+            std::fs::read(dir.path().join("config.yaml")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("current.yaml")).unwrap(),
+            "unchanged generated config"
+        );
+    }
+    #[test]
+    fn failed_or_noop_rename_does_not_write_saved_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = Store::open(dir.path()).unwrap();
+            store
+                .save(&State {
+                    next_id: 2,
+                    sources: vec![source(1), source(2)],
+                })
+                .unwrap();
+        }
+        let path = dir.path().join("sources.yaml");
+        let before = std::fs::read(&path).unwrap();
+        for (target, new_name) in [
+            ("source1", "source2"),
+            ("missing", "New"),
+            ("source1", " "),
+            ("source1", "bad\nname"),
+        ] {
+            assert!(
+                run_action(
+                    Some(dir.path().into()),
+                    Action::Rename {
+                        target: Target::Name(target.into()),
+                        new_name: Some(new_name.into())
+                    }
+                )
+                .is_err()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
+        run_action(
+            Some(dir.path().into()),
+            Action::Rename {
+                target: Target::Name("source1".into()),
+                new_name: Some("source1".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    #[test]
+    fn rename_prompt_validates_input_and_handles_eof() {
+        let mut prompt = Vec::new();
+        let name = prompt_source_name(
+            &mut std::io::Cursor::new(b"  New source  \r\n"),
+            &mut prompt,
+        )
+        .unwrap();
+        assert_eq!(name, "New source");
+        assert_eq!(prompt, b"New source name: ");
+        for input in ["", "\n", " \n", "bad\0name\n"] {
+            assert!(prompt_source_name(&mut std::io::Cursor::new(input), &mut Vec::new()).is_err());
+        }
     }
 }

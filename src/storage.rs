@@ -16,6 +16,9 @@ use tempfile::NamedTempFile;
 pub struct Settings {
     #[serde(default = "default_tray_enabled")]
     pub tray_enabled: bool,
+    /// Terminal command used by the tray to open the dashboard.
+    #[serde(default, rename = "default_terminal", alias = "default-terminal")]
+    pub default_terminal: Option<String>,
     pub output: PathBuf,
     pub mihomo_binary: PathBuf,
     #[serde(default)]
@@ -72,6 +75,16 @@ pub struct State {
 pub struct Store {
     pub root: PathBuf,
     _lock: File,
+}
+impl Drop for Store {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // A concurrent fork can retain this open file description until exec.
+        // Unlock explicitly; closing only our FD can leave the lock alive.
+        unsafe {
+            libc::flock(self._lock.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 impl Store {
     pub fn open(root: &Path) -> Result<Self> {
@@ -300,5 +313,19 @@ mod tests {
             fs::metadata(&p).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+    #[test]
+    fn closing_store_releases_lock_even_with_an_inherited_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        // Like a child between fork and exec, keep the same open description.
+        let inherited = store._lock.try_clone().unwrap();
+        drop(store);
+        let reopened = Store::open(dir.path()).unwrap();
+        assert!(Store::open(dir.path()).is_err());
+        drop(inherited);
+        assert!(Store::open(dir.path()).is_err());
+        drop(reopened);
+        assert!(Store::open(dir.path()).is_ok());
     }
 }

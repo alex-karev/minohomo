@@ -22,6 +22,10 @@ pub enum Action {
     Run,
     /// Enable or disable the default profile's tray service from config.yaml
     Sync,
+    /// Enable the tray in config.yaml and synchronize the user service
+    Enable,
+    /// Disable the tray in config.yaml and synchronize the user service
+    Disable,
 }
 
 pub fn run(root: &Path, action: &Action) -> Result<()> {
@@ -31,6 +35,31 @@ pub fn run(root: &Path, action: &Action) -> Result<()> {
     );
     match action {
         Action::Sync => sync(root),
+        Action::Enable | Action::Disable => {
+            let enabled = matches!(action, Action::Enable);
+            {
+                let store = Store::open(root)?;
+                store.settings()?;
+                let path = root.join("config.yaml");
+                let body = std::fs::read_to_string(&path)?;
+                crate::storage::atomic_write(
+                    &path,
+                    rewrite_preference(&body, enabled)?.as_bytes(),
+                )?;
+            }
+            println!(
+                "Tray preference saved: {}",
+                if enabled { "enabled" } else { "disabled" }
+            );
+            if root == crate::default_config_dir()? {
+                sync(root).context("preference saved, but tray service synchronization failed")?;
+            } else {
+                println!(
+                    "Custom profile: automatic service management uses the default profile only."
+                );
+            }
+            Ok(())
+        }
         Action::Run => {
             // Initialize once, then release the CLI lock before the long-running loop.
             let settings = if root.join("config.yaml").exists() {
@@ -43,6 +72,42 @@ pub fn run(root: &Path, action: &Action) -> Result<()> {
             }
             serve(root)
         }
+    }
+}
+
+/// Preserve comments in normal block YAML. Validate the edit against the parsed
+/// mapping before writing; unusual YAML syntax falls back to serialization.
+fn rewrite_preference(body: &str, enabled: bool) -> Result<String> {
+    let mut expected: serde_yaml::Value = serde_yaml::from_str(body)?;
+    expected
+        .as_mapping_mut()
+        .context("config.yaml must be a mapping")?
+        .insert(crate::storage::key("tray-enabled"), enabled.into());
+    let mut replaced = false;
+    let mut edited = String::new();
+    for line in body.split_inclusive('\n') {
+        if !replaced
+            && ["tray-enabled:", "'tray-enabled':", "\"tray-enabled\":"]
+                .iter()
+                .any(|key| line.starts_with(key))
+        {
+            let comment = line
+                .find('#')
+                .map(|index| format!(" {}", line[index..].trim_end()))
+                .unwrap_or_default();
+            edited.push_str(&format!("tray-enabled: {enabled}{comment}\n"));
+            replaced = true;
+        } else {
+            edited.push_str(line);
+        }
+    }
+    if !replaced {
+        edited.push_str(&format!("\ntray-enabled: {enabled}\n"));
+    }
+    if serde_yaml::from_str::<serde_yaml::Value>(&edited).is_ok_and(|value| value == expected) {
+        Ok(edited)
+    } else {
+        Ok(serde_yaml::to_string(&expected)?)
     }
 }
 
@@ -106,6 +171,7 @@ enum Request {
     Mode(Mode),
     Proxy { group: String, name: String },
     Service(&'static str),
+    OpenDashboard,
 }
 
 #[derive(Default)]
@@ -118,7 +184,7 @@ struct Snapshot {
     api_error: Option<String>,
 }
 
-fn service_state() -> String {
+pub(crate) fn service_state() -> String {
     match Command::new("/usr/bin/systemctl")
         .args([
             "show",
@@ -167,6 +233,7 @@ fn snapshot(root: &Path) -> Snapshot {
 
 fn execute(root: &Path, request: Request) -> Result<()> {
     match request {
+        Request::OpenDashboard => crate::terminal::open_dashboard(root),
         Request::Mode(mode) => Controller::for_tray(&Store::load_settings(root)?)?.mode(mode),
         Request::Proxy { group, name } => {
             Controller::for_tray(&Store::load_settings(root)?)?.switch_group(&group, &name)
@@ -341,6 +408,17 @@ impl ksni::Tray for Tray {
                 .into(),
             );
         }
+        items.push(
+            StandardItem {
+                label: "Open dashboard".into(),
+                icon_name: "utilities-terminal".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    let _ = tray.tx.send(Request::OpenDashboard);
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
         if let Some(error) = &self.status.api_error {
             items.push(label(format!("API unavailable: {error}")));
         }
@@ -420,13 +498,16 @@ mod tests {
     #[test]
     fn embedded_icon_is_argb() {
         let icon = icon().unwrap();
-        assert_eq!((icon.width, icon.height), (150, 150));
-        assert_eq!(icon.data.len(), 150 * 150 * 4);
         let mut reader = png::Decoder::new(Cursor::new(include_bytes!("assets/tray.png")))
             .read_info()
             .unwrap();
         let mut rgba = vec![0; reader.output_buffer_size()];
-        reader.next_frame(&mut rgba).unwrap();
+        let info = reader.next_frame(&mut rgba).unwrap();
+        assert_eq!(
+            (icon.width, icon.height),
+            (info.width as i32, info.height as i32)
+        );
+        assert_eq!(icon.data.len(), info.buffer_size());
         for (argb, rgba) in icon
             .data
             .as_chunks::<4>()
@@ -466,7 +547,7 @@ mod tests {
             tx,
             icon: icon().unwrap(),
         };
-        assert_eq!(ksni::Tray::menu(&tray).len(), 10);
+        assert_eq!(ksni::Tray::menu(&tray).len(), 11);
     }
     #[test]
     fn synchronization_enables_watcher_and_tray() {
@@ -562,5 +643,22 @@ mod tests {
             rx.try_recv().unwrap(),
             Request::Service("restart")
         ));
+    }
+    #[test]
+    fn preference_edits_preserve_comments_and_other_fields() {
+        let body = "# settings\ntray-enabled: true # desktop\noutput: current.yaml\n";
+        let changed = rewrite_preference(body, false).unwrap();
+        assert!(changed.contains("# settings"));
+        assert!(changed.contains("tray-enabled: false # desktop"));
+        for body in [
+            "{output: current.yaml, tray-enabled: true}",
+            "---\noutput: current.yaml\n...\n",
+            "output: current.yaml\n",
+        ] {
+            let result = rewrite_preference(body, false).unwrap();
+            let value: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+            assert_eq!(value["tray-enabled"], false);
+            assert_eq!(value["output"], "current.yaml");
+        }
     }
 }

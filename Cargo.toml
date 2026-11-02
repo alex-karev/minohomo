@@ -10,16 +10,20 @@ anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
+crossterm = "0.29.0"
 ksni = { version = "0.3.7", features = ["blocking"] }
 libc = "0.2"
 percent-encoding = "2"
 png = "0.17"
 prost = "0.14"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "std"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "gzip", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+shell-words = "1.1.1"
 tempfile = "3"
+unicode-width = "0.2.3"
 url = "2"
 
 [package.metadata.deb]
@@ -28,7 +32,8 @@ Import proxy subscriptions and direct proxy links into a per-user Mihomo config.
 Apply editable local routing rules, manage geosite data, validate generated
 configuration, and use sudo to install it for the system Mihomo service.
 Requires a separately installed Mihomo binary and service. Subscription updates
-are manual. Includes an optional desktop tray managed by a systemd user service.
+are manual. Run without a subcommand for an interactive terminal dashboard.
+Includes an optional desktop tray managed by a systemd user service.
 """
 maintainer = "Alex Karev <alexkarev@sjtu.edu.cn>"
 copyright = "2026, Alex Karev <alexkarev@sjtu.edu.cn>"

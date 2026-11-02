@@ -1,6 +1,10 @@
 # minohomo settings. Existing files are never overwritten by init.
 # Desktop tray. Changes automatically enable/disable its systemd user service.
 tray-enabled: true
+# Tray dashboard terminal. null/empty uses the system default.
+# Examples: "kitty", "gnome-terminal", "konsole", "alacritty".
+# Extra arguments are supported, e.g. "kitty --single-instance".
+default_terminal: null
 # Relative to the minohomo config directory.
 output: current.yaml
 mihomo-binary: /usr/bin/mihomo

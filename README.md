@@ -1,6 +1,6 @@
 # Minohomo
 
-A Rust CLI that imports proxy subscriptions and direct proxy links into Mihomo. It merges proxies, applies your local routing policy, validates the generated config, and uses sudo to install the result for the system Mihomo service.
+A Rust CLI and terminal dashboard that import proxy subscriptions and direct proxy links into Mihomo. It merges proxies, applies your local routing policy, validates the generated config, and uses sudo to install the result for the system Mihomo service.
 
 Subscription updates are manual. Mihomo runs independently as the system service `mihomo.service`. An optional desktop tray runs separately as the systemd user service `minohomo-tray.service`.
 
@@ -65,6 +65,55 @@ sudo minohomo apply --config "$HOME/.config/minohomo/current.yaml" \
 
 Omit `--geosite` to preserve the system database. The helper accepts only config/database input paths; its destination, validator binary, and service name are fixed. It does not read user settings as root. Applying a user-provided Mihomo config is still a privileged operation: use normal sudo authorization, not a restricted passwordless sudoers rule that assumes this is safe for untrusted users.
 
+## Terminal dashboard
+
+Run `minohomo` without a subcommand to open the Ratatui dashboard:
+
+```sh
+minohomo
+# Or open another profile:
+minohomo --config-dir /absolute/path
+```
+
+Run it as your normal user in an interactive terminal. Existing CLI subcommands keep their behavior. When stdin or stdout is not a terminal, the dashboard exits with a message instead of emitting terminal control codes.
+
+The layout has three panels:
+
+- **Sources:** saved subscriptions and independent proxies, cached node counts, last update times. Add a URL/link, optionally name it, remove a selected source, or update one/all sources. Source links and credentials stay hidden outside the add dialog.
+- **Network:** proxy delay tests, sorted fastest first, plus an on-demand public IP and approximate location lookup.
+- **Actions:** every operation in one browsable list, including cached config generation, geosite download with/without reload, editor shortcuts, tray preference, and system service controls.
+
+The header shows the system Mihomo service state, running mode, selected proxy, saved tray preference, geosite file size, and config/rules editor shortcuts. It refreshes every few seconds. An unavailable API does not prevent source management, editing, or service control.
+
+| Key | Action |
+| --- | --- |
+| `Tab`, `Shift-Tab`, `1`/`2`/`3` | Switch panels |
+| `Up`/`Down`, `j`/`k`, `PgUp`/`PgDn`, `Home`/`End` | Navigate the active list |
+| `Enter` in Actions | Run selected action |
+| `a`, `d` | Add or remove a source |
+| `n` in Sources | Rename the selected source |
+| `u`, `U` | Update selected source or all sources |
+| `g` | Update geosite and reload Mihomo |
+| `c`, `r` | Edit config.yaml or rules.yaml |
+| `m`, `x` | Pick running mode or proxy; type to filter choices |
+| `s` | Start, stop, or restart Mihomo |
+| `p`, `i` | Ping proxies or look up public IP/location |
+| `t` | Toggle tray-enabled and synchronize its user service |
+| `F5` | Refresh status |
+| `?`, `F1` | Keyboard help; arrows scroll it |
+| `Esc` | Cancel a dialog, or quit from the main screen |
+| `q`, `Ctrl-C` | Quit from the main screen; Ctrl-C also exits from dialogs |
+
+In the add form, `Tab` moves between the name, link, and HTTP(S)-proxy checkbox. Paste a subscription URL or direct proxy link. Use the checkbox only when an HTTP(S) link describes a proxy endpoint rather than a subscription. `Space` toggles it, `Ctrl-U` clears a text field, and `Enter` saves. Deletion, stop, and restart ask for confirmation; only `y` confirms, while `Enter` cancels.
+
+Editors use `$VISUAL`, then `$EDITOR`, then Debian's `sensible-editor`. Editor arguments and quoted paths work without a shell. For GUI editors, configure a wait flag, for example `EDITOR='code --wait'`, so the dashboard resumes after editing. Closing the editor returns directly to the dashboard. Apply cached sources from Actions to deploy config/rule edits without fetching subscriptions.
+
+Status, ping, mode/proxy changes, and IP lookups run in a background worker. While a network action runs, you can browse panels or quit. Updates, geosite downloads, tray changes, and service commands temporarily restore the normal terminal, run the existing CLI, and show its output. Sudo can prompt there. Press Enter afterward to return. The dashboard does not hold the source-cache lock between actions, so another CLI process can work on the same profile.
+
+Public IP lookup contacts **https://ipwho.is/** only when requested. The provider sees the request's outbound IP. The result includes the IP, approximate location, ISP, and lookup time. It follows system routing, TUN, and proxy environment settings; it does not prove that Mihomo carried the request. Failed/rate-limited requests show an error without discarding the last successful result. No lookup runs automatically at startup.
+
+The dashboard inherits the terminal's foreground/background colors. Selection uses reverse video; headings use bold/dim text. No hardcoded light/dark palette or color-detection request. Minimum size is 64 columns by 22 rows. The UI restores the terminal on normal exit, errors, and panics.
+
 ## Commands
 
 ```text
@@ -80,6 +129,7 @@ minohomo switch [PROXYNAME]
 minohomo start
 minohomo stop
 minohomo delete <NAME>
+minohomo rename <NAME> [NEW_NAME]
 minohomo update [NAME] [--no-sync]
 minohomo geosite status
 minohomo geosite update [--url URL] [--no-reload]
@@ -97,8 +147,9 @@ sudo minohomo apply --config PATH [--geosite PATH]
 | `dump` | Prints the generated `current.yaml` verbatim, without generating or applying anything. |
 | `controller` | Prints the controller URL, then `secret: SECRET` on the next line. Does not contact Mihomo. |
 | `switch [PROXYNAME]` | Selects a proxy in the `PROXY` group. With no argument, shows the current selection and available names. |
-| `tray run`, `tray sync` | Run the desktop tray, or synchronize its systemd user service with `tray-enabled`. |
-| `start`, `stop` | Uses a sudo subcommand to start or stop the system `mihomo.service`. Does not generate or install a config. |
+| `tray run`, `tray sync`, `tray enable`, `tray disable` | Run the desktop tray, synchronize its user service, or save and apply its enabled preference. |
+| `start`, `stop`, `restart` | Uses a sudo subcommand to start, stop, or restart the system `mihomo.service`. Does not generate or install a config. |
+| `rename NAME [NEW_NAME]` | Renames the saved source without changing its cache or timestamps. Prompts for the new name when omitted. |
 | `delete NAME` | Removes the named source and its cache. Run `update --no-sync` to apply the removal. |
 | `update` | Refreshes all sources, generates and validates the merged config, then installs it through sudo and restarts Mihomo. |
 | `update NAME` | Refreshes one source and regenerates using cached proxies from all other sources. Never-updated sources are omitted with a message. |
@@ -245,9 +296,10 @@ Personal [proxy] trojan://PASSWORD@server.example:443#Proxy1
 ```sh
 minohomo start
 minohomo stop
+minohomo restart
 ```
 
-These commands invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop mihomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
+These commands invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop|restart mihomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
 
 ### Desktop tray
 
@@ -262,6 +314,9 @@ The preference defaults to true, including for existing config files. After inst
 
 ```sh
 minohomo tray sync
+# Save the preference and synchronize in one command:
+minohomo tray disable
+minohomo tray enable
 ```
 
 This enables and starts `minohomo-tray.service` and `minohomo-tray-config.path` for your user. The tray starts with future graphical sessions. The path unit watches `~/.config/minohomo/config.yaml`. Changing `tray-enabled` to false automatically stops and disables the tray service; changing it back to true enables and starts it again. The lightweight path watcher stays enabled while the icon is disabled so it can detect that change. Package installation itself does not enable services. Neither unit enables or disables the system Mihomo service at boot.
@@ -271,6 +326,21 @@ The tray shows Mihomo's running/stopped state, current mode, and selected proxy.
 - Switch between Rule, Global, and Direct modes.
 - Select a proxy from the running `PROXY` group, or `GLOBAL` in Global mode.
 - Enable, disable, or restart the system `mihomo.service`.
+- Open the terminal dashboard in your preferred terminal emulator.
+
+The **Open dashboard** menu item launches the same profile's TUI in a new terminal. Set the top-level terminal preference in `config.yaml`:
+
+```yaml
+default_terminal: null             # System default
+# default_terminal: "kitty"
+# default_terminal: "gnome-terminal"
+# default_terminal: "konsole --separate"
+# default_terminal: "alacritty"
+```
+
+Unset, null, or empty uses `xdg-terminal-exec` when available, then Debian's `x-terminal-emulator` alternative, then `$TERMINAL` as a fallback. Custom commands support quoted paths and arguments without a shell. The launcher supplies the emulator's execution flag; a custom command can include an explicit trailing `--`, `-e`, `-x`, or `--execute` flag to override it. The tray reads this setting on each click. `default-terminal` is also accepted as an alias.
+
+The terminal starts in its own transient systemd user service, so disabling the tray does not close the dashboard. Launch failures appear in the tray's error entry; errors after terminal startup appear in the user journal. This requires a working systemd user manager and an installed terminal emulator.
 
 Enable/disable in this menu means start/stop, not boot-time enablement. Service actions use systemctl and the desktop polkit authentication agent. Install and enable a polkit agent for your desktop; unauthorized or cancelled actions show an error in the menu and user journal. Mode and proxy changes use the authenticated Mihomo API without root access. The tray remains available when Mihomo is stopped or the API is unreachable. Runtime changes do not rewrite generated config.
 
@@ -286,7 +356,7 @@ To remove all tray automation, set `tray-enabled: false`, then run `systemctl --
 
 ### Source names and display names
 
-Every subscription and independent proxy has a unique **source name**, used to identify the source in `delete`, `update`, `list`, and direct-proxy `switch` commands. Pass `--name` to choose it. Without that flag, minohomo assigns a random lowercase hex name of exactly six characters, such as `a3f09c`, and prints it after adding the source. Names persist across updates.
+Every subscription and independent proxy has a unique **source name**, used to identify the source in `delete`, `rename`, `update`, `list`, and direct-proxy `switch` commands. Pass `--name` to choose it. Without that flag, minohomo assigns a random lowercase hex name of exactly six characters, such as `a3f09c`, and prints it after adding the source. Names persist across updates.
 
 A node's **display name** comes from its imported proxy link or subscription entry. Generated Mihomo names follow these rules:
 
@@ -306,6 +376,25 @@ minohomo delete Personal
 `--name` changes the source name, not the independent proxy's display name. Edit the link's `#fragment` when adding a direct proxy to choose its display name. Duplicate generated display names receive a suffix to keep the Mihomo config valid.
 
 Source names must be unique. `--name` accepts one link per command; bulk adds without `--name` assign a separate random name to each source. Existing sources without names receive persistent random names on their next use. For legacy duplicate names, the first source keeps the name and later sources receive random names. minohomo prints these migration assignments.
+
+### Rename a source
+
+Use the same exact saved source name as `delete`, including numeric names:
+
+```sh
+minohomo rename Personal "Work proxy"
+minohomo rename a3f09c Office
+# Omit the new name to enter it at a prompt:
+minohomo rename Office
+# Names beginning with a dash go after --:
+minohomo rename -- --old --new
+```
+
+The new name must be nonempty, contain no control characters, and be unique among saved sources. The prompt accepts spaces and Unicode. Empty input, EOF, an unknown source, or a duplicate name leaves the saved source unchanged. Renaming to its current name is a no-op.
+
+In the TUI, select a source in **Sources**, then press `n`. The dialog starts with its current name. Edit it, or use `Ctrl-U` to clear it; `Enter` saves and `Esc` cancels. Rename is also listed under Actions.
+
+Renaming changes only the saved source name. It preserves the source ID, URL/link, cached proxy data, and timestamps. It does not fetch subscriptions, edit the generated config, or restart Mihomo. Independent proxies keep their node display names. Subscription names become generated node prefixes on the next generation, so run `minohomo update --no-sync` or choose **Apply cached sources** in Actions to deploy those changes.
 
 ### Select sources by name
 
