@@ -1,6 +1,6 @@
 # Maintainer: Alex Karev <alexkarev@sjtu.edu.cn>
 pkgname=minohomo
-pkgver=0.1.5
+pkgver=0.1.6
 pkgrel=1
 pkgdesc='Linux proxy client with a terminal dashboard, desktop tray, and managed Mihomo core'
 arch=('x86_64' 'aarch64')
