@@ -1,0 +1,13 @@
+[Unit]
+Description=Minohomo status tray
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+
+[Service]
+ExecStart=/usr/bin/minohomo tray run
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

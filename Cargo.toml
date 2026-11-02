@@ -1,8 +1,8 @@
 [package]
 name = "minohomo"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
-description = "Subscription manager and Mihomo config generator"
+description = "Linux proxy client with a terminal dashboard, desktop tray, and managed Mihomo core"
 license = "GPL-3.0-only"
 
 [dependencies]
@@ -10,35 +10,48 @@ anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
+crossterm = "0.29.0"
+flate2 = "1"
+ksni = { version = "0.3.7", features = ["blocking"] }
 libc = "0.2"
 percent-encoding = "2"
+png = "0.17"
 prost = "0.14"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "std"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "gzip", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+shell-words = "1.1.1"
 tempfile = "3"
+unicode-width = "0.2.3"
 url = "2"
+zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
 
 [package.metadata.deb]
 extended-description = """
-Import proxy subscriptions and direct proxy links into a per-user Mihomo config.
-Apply editable local routing rules, manage geosite data, validate generated
-configuration, and use sudo to install it for the system Mihomo service.
-Requires a separately installed Mihomo binary and service. Subscription updates
-are manual.
+A Linux proxy client with an interactive terminal dashboard, optional desktop
+tray, and full CLI. Manage subscriptions and direct proxy links, select proxies
+and routing modes, test connections, edit routing policy, and update geosite data.
+Downloads and manages its own Mihomo core and system service with TUN support.
+Subscription updates are manual. Privileged operations use sudo or desktop polkit.
 """
 maintainer = "Alex Karev <alexkarev@sjtu.edu.cn>"
 copyright = "2026, Alex Karev <alexkarev@sjtu.edu.cn>"
 license-file = ["LICENSE", "0"]
 depends = "$auto, ca-certificates, sudo"
-recommends = "systemd"
-suggests = "mihomo"
+recommends = "systemd, polkitd"
 section = "net"
 priority = "optional"
 assets = [
+    ["packaging/minohomo.service", "usr/lib/systemd/system/", "644"],
+    ["packaging/minohomo-tray.service", "usr/lib/systemd/user/", "644"],
+    ["packaging/minohomo-tray-config.service", "usr/lib/systemd/user/", "644"],
+    ["packaging/minohomo-tray-config.path", "usr/lib/systemd/user/", "644"],
+    ["src/assets/tray.png", "usr/share/icons/hicolor/150x150/apps/minohomo.png", "644"],
     ["target/release/minohomo", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/minohomo/README.md", "644"],
+    ["docs/*.md", "usr/share/doc/minohomo/docs/", "644"],
     ["defaults/config.yaml", "usr/share/doc/minohomo/defaults/config.yaml", "644"],
     ["defaults/rules.yaml", "usr/share/doc/minohomo/defaults/rules.yaml", "644"],
 ]

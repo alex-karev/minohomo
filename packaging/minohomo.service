@@ -1,0 +1,18 @@
+[Unit]
+Description=Minohomo managed Mihomo core
+Documentation=https://wiki.metacubex.one
+After=network.target nss-lookup.target network-online.target
+
+[Service]
+Type=simple
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_TIME CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_TIME CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+ExecStart=/var/lib/minohomo/mihomo -d /var/lib/minohomo -f /var/lib/minohomo/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=infinity
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

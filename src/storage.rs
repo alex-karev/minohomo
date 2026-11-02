@@ -14,8 +14,24 @@ use tempfile::NamedTempFile;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default = "default_tray_enabled")]
+    pub tray_enabled: bool,
+    /// Terminal command used by the tray to open the dashboard.
+    #[serde(default, rename = "default_terminal", alias = "default-terminal")]
+    pub default_terminal: Option<String>,
     pub output: PathBuf,
+    #[serde(default = "crate::core::default_binary")]
     pub mihomo_binary: PathBuf,
+    #[serde(
+        default = "crate::core::default_version_url",
+        alias = "core_version_url"
+    )]
+    pub core_version_url: String,
+    #[serde(
+        default = "crate::core::default_download_url",
+        alias = "core_download_url"
+    )]
+    pub core_download_url: String,
     #[serde(default)]
     pub reload_command: Vec<String>,
     pub request_timeout_seconds: u64,
@@ -25,6 +41,9 @@ pub struct Settings {
     #[serde(default)]
     pub proxy_overrides: Proxy,
     pub mihomo: Mapping,
+}
+fn default_tray_enabled() -> bool {
+    true
 }
 fn default_geosite_url() -> String {
     "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat".into()
@@ -67,6 +86,16 @@ pub struct State {
 pub struct Store {
     pub root: PathBuf,
     _lock: File,
+}
+impl Drop for Store {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // A concurrent fork can retain this open file description until exec.
+        // Unlock explicitly; closing only our FD can leave the lock alive.
+        unsafe {
+            libc::flock(self._lock.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 impl Store {
     pub fn open(root: &Path) -> Result<Self> {
@@ -146,10 +175,18 @@ impl Store {
         Ok(state)
     }
     pub fn settings(&self) -> Result<Settings> {
-        let mut s: Settings = read_yaml(&self.root.join("config.yaml"))?;
+        Self::load_settings(&self.root)
+    }
+    /// Read settings without taking the source-cache lock (for the tray worker).
+    pub fn load_settings(root: &Path) -> Result<Settings> {
+        let mut s: Settings = read_yaml(&root.join("config.yaml"))?;
+        // Migrate the old packaged-core default without rewriting user YAML.
+        if s.mihomo_binary == Path::new("/usr/bin/mihomo") {
+            s.mihomo_binary = crate::core::default_binary();
+        }
         // Relative outputs follow --config-dir, not the process working directory.
         if s.output.is_relative() {
-            s.output = self.root.join(&s.output);
+            s.output = root.join(&s.output);
         }
         ensure!(s.output.is_absolute(), "output must be an absolute path");
         ensure!(
@@ -157,9 +194,9 @@ impl Store {
             "request-timeout-seconds must be positive"
         );
         ensure!(
-            s.output != self.root.join("sources.yaml")
-                && s.output != self.root.join("rules.yaml")
-                && s.output != self.root.join("config.yaml"),
+            s.output != root.join("sources.yaml")
+                && s.output != root.join("rules.yaml")
+                && s.output != root.join("config.yaml"),
             "output must not overwrite minohomo's own files"
         );
         Ok(s)
@@ -274,6 +311,13 @@ mod tests {
         assert!(Store::open(dir.path()).is_err());
     }
     #[test]
+    fn tray_settings_can_be_read_while_cli_holds_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let _store = Store::open(dir.path()).unwrap();
+        assert!(Store::load_settings(dir.path()).unwrap().tray_enabled);
+        assert!(Store::open(dir.path()).is_err());
+    }
+    #[test]
     fn private_atomic_files() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("secret");
@@ -283,6 +327,60 @@ mod tests {
         assert_eq!(
             fs::metadata(&p).unwrap().permissions().mode() & 0o777,
             0o600
+        );
+    }
+    #[test]
+    fn closing_store_releases_lock_even_with_an_inherited_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        // Like a child between fork and exec, keep the same open description.
+        let inherited = store._lock.try_clone().unwrap();
+        drop(store);
+        let reopened = Store::open(dir.path()).unwrap();
+        assert!(Store::open(dir.path()).is_err());
+        drop(inherited);
+        assert!(Store::open(dir.path()).is_err());
+        drop(reopened);
+        assert!(Store::open(dir.path()).is_ok());
+    }
+    #[test]
+    fn legacy_binary_default_uses_managed_core_and_custom_urls_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let path = dir.path().join("config.yaml");
+        let body = fs::read_to_string(&path).unwrap().replace(
+            "mihomo-binary: /var/lib/minohomo/mihomo",
+            "mihomo-binary: /usr/bin/mihomo",
+        );
+        fs::write(&path, &body).unwrap();
+        let settings = store.settings().unwrap();
+        assert_eq!(settings.mihomo_binary, Path::new(crate::core::BINARY));
+        assert_eq!(settings.core_version_url, crate::core::VERSION_URL);
+        assert_eq!(fs::read_to_string(&path).unwrap(), body);
+        let mut config: Value = serde_yaml::from_str(&body).unwrap();
+        config["core-version-url"] = "https://mirror.test/version.txt".into();
+        config["core-download-url"] = "https://mirror.test/{artifact}-{version}.{ext}".into();
+        fs::write(&path, serde_yaml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(
+            store.settings().unwrap().core_version_url,
+            "https://mirror.test/version.txt"
+        );
+        config
+            .as_mapping_mut()
+            .unwrap()
+            .remove(key("core-version-url"));
+        config
+            .as_mapping_mut()
+            .unwrap()
+            .remove(key("core-download-url"));
+        config
+            .as_mapping_mut()
+            .unwrap()
+            .remove(key("mihomo-binary"));
+        fs::write(&path, serde_yaml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(
+            store.settings().unwrap().mihomo_binary,
+            Path::new(crate::core::BINARY)
         );
     }
 }

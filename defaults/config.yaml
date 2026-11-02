@@ -1,8 +1,18 @@
 # minohomo settings. Existing files are never overwritten by init.
+# Desktop tray. Changes automatically enable/disable its systemd user service.
+tray-enabled: true
+# Tray dashboard terminal. null/empty uses the system default.
+# Examples: "kitty", "gnome-terminal", "konsole", "alacritty".
+# Extra arguments are supported, e.g. "kitty --single-instance".
+default_terminal: null
 # Relative to the minohomo config directory.
 output: current.yaml
-mihomo-binary: /usr/bin/mihomo
-# Empty means: sudo minohomo apply --config <output>, then restart mihomo.service.
+# Managed core; no separate Mihomo package is required.
+mihomo-binary: /var/lib/minohomo/mihomo
+core-version-url: https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt
+# Placeholders: {version}, {artifact}, {ext}. Change for an archive mirror.
+core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{version}/{artifact}-{version}.{ext}
+# Empty means: sudo minohomo apply --config <output>, then restart minohomo.service.
 # Nonempty overrides deployment with a custom command, run as your current user.
 reload-command: []
 request-timeout-seconds: 45

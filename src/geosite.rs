@@ -188,6 +188,7 @@ fn required_tags(store: &Store, settings: &Settings, fallback: &str) -> Result<B
 fn install(store: &Store, settings: &Settings, database: &Path, bytes: &[u8]) -> Result<()> {
     let list = inspect(bytes)?;
     let tags = required_tags(store, settings, &list.entries[0].code)?;
+    crate::core::ensure_local(settings)?;
     let work = tempfile::tempdir_in(&store.root)?;
     storage::atomic_write(&work.path().join("GeoSite.dat"), bytes)?;
     let mut candidate = Mapping::new();

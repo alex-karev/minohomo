@@ -1,0 +1,7 @@
+[Unit]
+Description=Apply Minohomo tray preference
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/minohomo tray sync
+UMask=0077

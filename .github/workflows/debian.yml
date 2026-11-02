@@ -100,11 +100,21 @@ jobs:
           version=$(cargo metadata --locked --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "minohomo") | .version')
           test "$(target/deb-smoke/usr/bin/minohomo --version)" = "minohomo $version"
+          # Bare invocation must fail cleanly in noninteractive scripts, not hang.
+          if output=$(target/deb-smoke/usr/bin/minohomo </dev/null 2>&1); then
+            echo "::error::Dashboard unexpectedly started without a terminal"
+            exit 1
+          fi
+          [[ "$output" == *"dashboard needs an interactive terminal"* ]]
           # Installing the package must not configure or activate the daemon.
-          test ! -e target/deb-smoke/usr/lib/systemd/user
+          test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray.service
+          test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray-config.service
+          test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray-config.path
+          test -f target/deb-smoke/usr/share/icons/hicolor/150x150/apps/minohomo.png
           test ! -e target/deb-smoke/etc
-          test ! -e target/deb-smoke/usr/lib/systemd/system
-          test ! -e target/deb-smoke/lib/systemd/system
+          test -f target/deb-smoke/usr/lib/systemd/system/minohomo.service
+          grep -q '^ExecStart=/var/lib/minohomo/mihomo ' target/deb-smoke/usr/lib/systemd/system/minohomo.service
+          test ! -e target/deb-smoke/var/lib/minohomo
           cd dist
           sha256sum *.deb > "SHA256SUMS-${{ matrix.arch }}"
 
