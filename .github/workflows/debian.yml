@@ -112,8 +112,9 @@ jobs:
           test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray-config.path
           test -f target/deb-smoke/usr/share/icons/hicolor/150x150/apps/minohomo.png
           test ! -e target/deb-smoke/etc
-          test ! -e target/deb-smoke/usr/lib/systemd/system
-          test ! -e target/deb-smoke/lib/systemd/system
+          test -f target/deb-smoke/usr/lib/systemd/system/minohomo.service
+          grep -q '^ExecStart=/var/lib/minohomo/mihomo ' target/deb-smoke/usr/lib/systemd/system/minohomo.service
+          test ! -e target/deb-smoke/var/lib/minohomo
           cd dist
           sha256sum *.deb > "SHA256SUMS-${{ matrix.arch }}"
 

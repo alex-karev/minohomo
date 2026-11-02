@@ -1,9 +1,8 @@
 use crate::storage;
 use anyhow::{Context, Result, ensure};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::Read,
-    os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
     path::Path,
     process::Command,
 };
@@ -11,27 +10,38 @@ use std::{
 const MAX_CONFIG: u64 = 16 * 1024 * 1024;
 const MAX_DATABASE: u64 = 64 * 1024 * 1024;
 
-pub fn run(config: &Path, geosite: Option<&Path>) -> Result<()> {
+pub fn run(
+    config: &Path,
+    geosite: Option<&Path>,
+    version_url: &str,
+    download_url: &str,
+) -> Result<()> {
     ensure!(
         unsafe { libc::geteuid() } == 0,
         "apply requires root; run it with sudo"
     );
+    // Check input paths before downloading anything.
+    read_bounded(config, MAX_CONFIG)?;
+    if let Some(path) = geosite {
+        read_bounded(path, MAX_DATABASE)?;
+    }
+    crate::core::ensure_root(version_url, download_url)?;
     // Deliberately fixed destinations and commands. Never load user config.yaml as root.
     install(
         config,
         geosite,
-        Path::new("/etc/mihomo"),
-        Path::new("/usr/bin/mihomo"),
+        Path::new(crate::core::DIRECTORY),
+        Path::new(crate::core::BINARY),
     )?;
     let status = Command::new("/usr/bin/systemctl")
-        .args(["restart", "mihomo.service"])
+        .args(["restart", "minohomo.service"])
         .status()
-        .context("config installed, but cannot restart mihomo.service")?;
+        .context("config installed, but cannot restart minohomo.service")?;
     ensure!(
         status.success(),
-        "config installed, but mihomo.service restart failed; check 'systemctl status mihomo.service'"
+        "config installed, but minohomo.service restart failed; check 'systemctl status minohomo.service'"
     );
-    println!("Installed /etc/mihomo/config.yaml and restarted mihomo.service.");
+    println!("Installed /var/lib/minohomo/config.yaml and restarted minohomo.service.");
     Ok(())
 }
 
@@ -45,10 +55,13 @@ pub fn service(action: &str) -> Result<()> {
         "unsupported service action"
     );
     let status = Command::new("/usr/bin/systemctl")
-        .args([action, "mihomo.service"])
+        .args([action, "minohomo.service"])
         .status()
         .context("cannot run systemctl")?;
-    ensure!(status.success(), "systemctl {action} mihomo.service failed");
+    ensure!(
+        status.success(),
+        "systemctl {action} minohomo.service failed"
+    );
     println!("Mihomo service {action} succeeded.");
     Ok(())
 }
@@ -81,18 +94,7 @@ fn install(
     let database = geosite
         .map(|path| read_bounded(path, MAX_DATABASE))
         .transpose()?;
-    fs::create_dir_all(directory)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .mode(0o600)
-        .open(directory.join(".minohomo.lock"))?;
-    ensure!(
-        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
-        "another minohomo apply holds the system config lock"
-    );
+    let _lock = crate::core::runtime_lock(directory)?;
     let work = tempfile::tempdir_in(directory)?;
     let candidate = work.path().join("config.yaml");
     storage::atomic_write(&candidate, &config)?;
@@ -152,6 +154,7 @@ mod tests {
         fs::set_permissions(&validator, fs::Permissions::from_mode(0o700)).unwrap();
         let system = temp.path().join("system");
         fs::create_dir(&system).unwrap();
+        fs::set_permissions(&system, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(system.join("config.yaml"), "old").unwrap();
         fs::write(system.join("GeoSite.dat"), "old data").unwrap();
         fs::write(temp.path().join("current.yaml"), "new").unwrap();

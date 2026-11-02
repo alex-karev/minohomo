@@ -34,6 +34,7 @@ enum Operation {
     UpdateSelected,
     UpdateAll,
     ApplyCache,
+    CoreUpdate,
     Geosite,
     GeositeOnly,
     Mode,
@@ -78,6 +79,11 @@ const ACTIONS: &[(Operation, &str, &str)] = &[
         Operation::ApplyCache,
         "    Apply cached sources",
         "Regenerate after rule/config edits or source removal. No subscription fetch.",
+    ),
+    (
+        Operation::CoreUpdate,
+        "    Update Mihomo core",
+        "Download latest core, install through sudo, restart minohomo.service if running.",
     ),
     (
         Operation::Geosite,
@@ -370,6 +376,9 @@ impl App {
             Operation::UpdateAll => return Some(Foreground::Cli(vec!["update".into()])),
             Operation::ApplyCache => {
                 return Some(Foreground::Cli(vec!["update".into(), "--no-sync".into()]));
+            }
+            Operation::CoreUpdate => {
+                return Some(Foreground::Cli(vec!["core".into(), "update".into()]));
             }
             Operation::Geosite | Operation::GeositeOnly => {
                 let mut args = vec!["geosite".into(), "update".into()];

@@ -76,8 +76,9 @@ pub(super) fn draw(frame: &mut Frame, app: &mut App) {
         Line::from(vec![
             Span::styled("Mihomo  ", bold()),
             Span::raw(format!(
-                "{}   Mode: {}   Tray preference: {}",
+                "{}  Core: {}  Mode: {}  Tray: {}",
                 value(&status.service),
+                value(&status.core),
                 value(&status.mode),
                 if status.tray_enabled { "on" } else { "off" }
             )),

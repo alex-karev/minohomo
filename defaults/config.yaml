@@ -7,8 +7,12 @@ tray-enabled: true
 default_terminal: null
 # Relative to the minohomo config directory.
 output: current.yaml
-mihomo-binary: /usr/bin/mihomo
-# Empty means: sudo minohomo apply --config <output>, then restart mihomo.service.
+# Managed core; no separate Mihomo package is required.
+mihomo-binary: /var/lib/minohomo/mihomo
+core-version-url: https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt
+# Placeholders: {version}, {artifact}, {ext}. Change for an archive mirror.
+core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{version}/{artifact}-{version}.{ext}
+# Empty means: sudo minohomo apply --config <output>, then restart minohomo.service.
 # Nonempty overrides deployment with a custom command, run as your current user.
 reload-command: []
 request-timeout-seconds: 45

@@ -2,16 +2,16 @@
 
 A Rust CLI and terminal dashboard that import proxy subscriptions and direct proxy links into Mihomo. It merges proxies, applies your local routing policy, validates the generated config, and uses sudo to install the result for the system Mihomo service.
 
-Subscription updates are manual. Mihomo runs independently as the system service `mihomo.service`. An optional desktop tray runs separately as the systemd user service `minohomo-tray.service`.
+Subscription updates are manual. Mihomo runs independently as the system service `minohomo.service`. An optional desktop tray runs separately as the systemd user service `minohomo-tray.service`.
 
 ## Installation
 
-Requires an installed Mihomo binary with gVisor support. Defaults keep source files per-user and deploy the generated config to the system service:
+No separate Mihomo package is required. Minohomo downloads its own core and supplies the global `minohomo.service`. Defaults keep source files per-user and deploy runtime files under `/var/lib/minohomo`:
 
-- Binary: `/usr/bin/mihomo`
+- Binary: `/var/lib/minohomo/mihomo`
 - Local generated config: `~/.config/minohomo/current.yaml`
-- Installed config: `/etc/mihomo/config.yaml`
-- Apply: `sudo minohomo apply --config <current.yaml>`, then `systemctl restart mihomo.service`
+- Installed config: `/var/lib/minohomo/config.yaml`
+- Apply: `sudo minohomo apply --config <current.yaml>`, then `systemctl restart minohomo.service`
 
 ### Debian package
 
@@ -22,7 +22,45 @@ Download the `.deb` for your architecture from GitHub Releases or the **Debian p
 sudo apt install ./minohomo_*_amd64.deb
 ```
 
-The package installs `/usr/bin/minohomo`, documentation, config templates, the tray icon, and systemd user units. It does not install Mihomo, create user config files, modify your active config, or enable/start services. If you previously installed `/usr/local/bin/minohomo` manually, remove or replace that copy so it does not shadow the packaged binary.
+The package installs `/usr/bin/minohomo`, documentation, config templates, the tray icon, `minohomo.service`, and the tray systemd user units. It does not bundle the core, download it at package-install time, create user config files, modify your active config, or enable/start services. If you previously installed `/usr/local/bin/minohomo` manually, remove or replace that copy so it does not shadow the packaged binary.
+
+### Managed core
+
+Find the runtime binary at `/var/lib/minohomo/mihomo` and the active runtime config at `/var/lib/minohomo/config.yaml`. Runtime geodata also lives in `/var/lib/minohomo`. Minohomo no longer writes to `/etc` or uses the separate Mihomo package.
+
+```sh
+minohomo core version   # Prints Not installed if the managed core is absent
+minohomo core update
+```
+
+The Actions tab includes **Update Mihomo core**; the status pane shows the installed version. Updating sources, applying a config, and validating a geosite download install a missing managed core automatically. Core updates do not fetch subscriptions or regenerate config. They restart `minohomo.service` only if it is already running.
+
+By default, the updater reads the release tag from GitHub's latest `version.txt`, maps the host OS and architecture to a release artifact, then downloads and unpacks it in a private `/tmp/minohomo-core-*` directory. For x86-64, it uses `amd64-v2` when the CPU supports that baseline, otherwise `amd64-v1`. It checks the unpacked core's reported version before installation. Normal-user updates download without root, then use `sudo mv` to move the binary to `/var/lib/minohomo/mihomo`, `sudo chown root:root`, and `sudo chmod 755`. Temporary files are removed on success or failure. Applying as root runs those installation commands without sudo.
+
+Top-level settings support custom metadata and archive mirrors:
+
+```yaml
+core-version-url: https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt
+core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{version}/{artifact}-{version}.{ext}
+```
+
+The version endpoint must return a release tag such as `v1.19.33`. Archive templates support `{version}`, `{artifact}` (for example `mihomo-linux-amd64-v2`), and `{ext}` (`gz`, or `zip` for Windows artifacts). Custom version links still use GitHub archives unless you also change `core-download-url`. Only HTTPS downloads are accepted, except HTTP on loopback for local testing. Configured mirrors supply executable code: use a trusted source. The manager itself remains a Unix/systemd application; artifact-name mapping does not add Windows desktop/service support.
+
+For one-off overrides, use `minohomo core update --version-url URL --download-url TEMPLATE`. `update` forwards configured endpoints to the privileged apply helper when needed. Direct `sudo minohomo apply` uses built-in endpoints unless passed `--core-version-url URL --core-download-url TEMPLATE`; privileged apply never reads your user settings.
+
+A failed download, unpack, or version check leaves the installed core unchanged and prints manual recovery steps. To install manually, download the matching archive from [Mihomo releases](https://github.com/MetaCubeX/mihomo/releases), unpack it, then run:
+
+```sh
+sudo install -d -m 755 /var/lib/minohomo
+sudo mv -- /path/to/extracted/mihomo /var/lib/minohomo/mihomo
+sudo chown root:root /var/lib/minohomo/mihomo
+sudo chmod 755 /var/lib/minohomo/mihomo
+minohomo update --no-sync
+```
+
+Use `minohomo update` instead if no source cache exists yet. For an already configured runtime, `sudo systemctl restart minohomo.service` starts the new core. An installation or restart failure reports the error; it does not roll back a binary already moved into place. The runtime directory/core are root-owned and mode 755; installed config and geodata remain owner-only.
+
+The package does not enable the core service at boot. Opt in with `sudo systemctl enable minohomo.service` after the first successful apply. If migrating from a separate Mihomo package, stop its old daemon first to avoid port and TUN conflicts. Minohomo leaves that package, its service, and its `/etc` files untouched.
 
 ### From source
 
@@ -39,14 +77,15 @@ Run minohomo as your regular user:
 
 ```sh
 minohomo init
+minohomo core update  # Optional: update/apply also install a missing core
 minohomo add 'https://subscription.example/profile'
 minohomo geosite update --no-reload
 minohomo update
 ```
 
-`update` fetches sources and validates the generated config as your user. It saves `~/.config/minohomo/current.yaml`, then invokes the same minohomo executable through `sudo` with the `apply` subcommand. Expect a sudo password prompt. The helper validates a snapshot with `/usr/bin/mihomo`, installs it as `/etc/mihomo/config.yaml`, copies the local geosite database when available, and restarts `mihomo.service` using `/usr/bin/systemctl`.
+`update` fetches sources and validates the generated config as your user. It saves `~/.config/minohomo/current.yaml`, then invokes the same minohomo executable through `sudo` with the `apply` subcommand. Expect a sudo password prompt. The helper validates a snapshot with `/var/lib/minohomo/mihomo`, installs it as `/var/lib/minohomo/config.yaml`, copies the local geosite database when available, and restarts `minohomo.service` using `/usr/bin/systemctl`.
 
-Mihomo must already be installed with a system service that reads `/etc/mihomo/config.yaml` and uses `/etc/mihomo` as its data directory. TUN privileges belong to that service. minohomo itself needs neither root nor binary capabilities for its normal commands. The package depends on `sudo`; it does not install sudoers rules or enable/start services during installation.
+The supplied `minohomo.service` reads `/var/lib/minohomo/config.yaml` and uses `/var/lib/minohomo` as its data directory. Core installation also installs the unit for source-only installs if it is missing. TUN privileges belong to that service. minohomo itself needs neither root nor binary capabilities for its normal commands. The package depends on `sudo`; it does not install sudoers rules or enable/start services during installation.
 
 After editing local settings or rules, regenerate from cached proxies without refreshing subscriptions:
 
@@ -148,13 +187,13 @@ sudo minohomo apply --config PATH [--geosite PATH]
 | `controller` | Prints the controller URL, then `secret: SECRET` on the next line. Does not contact Mihomo. |
 | `switch [PROXYNAME]` | Selects a proxy in the `PROXY` group. With no argument, shows the current selection and available names. |
 | `tray run`, `tray sync`, `tray enable`, `tray disable` | Run the desktop tray, synchronize its user service, or save and apply its enabled preference. |
-| `start`, `stop`, `restart` | Uses a sudo subcommand to start, stop, or restart the system `mihomo.service`. Does not generate or install a config. |
+| `start`, `stop`, `restart` | Uses a sudo subcommand to start, stop, or restart the system `minohomo.service`. Does not generate or install a config. |
 | `rename NAME [NEW_NAME]` | Renames the saved source without changing its cache or timestamps. Prompts for the new name when omitted. |
 | `delete NAME` | Removes the named source and its cache. Run `update --no-sync` to apply the removal. |
 | `update` | Refreshes all sources, generates and validates the merged config, then installs it through sudo and restarts Mihomo. |
 | `update NAME` | Refreshes one source and regenerates using cached proxies from all other sources. Never-updated sources are omitted with a message. |
 | `update --no-sync` | Regenerates from cached proxies, validates, installs, and restarts without fetching sources. Cannot be combined with a source name. |
-| `apply --config PATH [--geosite PATH]` | Root-only installer used by `update`. Validates, installs to `/etc/mihomo`, and restarts the system service. |
+| `apply --config PATH [--geosite PATH]` | Root-only installer used by `update`. Installs a missing core, validates, installs to `/var/lib/minohomo`, and restarts `minohomo.service`. |
 
 Examples:
 
@@ -184,13 +223,14 @@ Edit the source files, not the generated Mihomo config:
 | `~/.config/minohomo/rules.yaml` | Complete routing policy and optional rule providers |
 | `~/.config/minohomo/sources.yaml` | Saved links, unique source names, internal IDs, timestamps, and cached proxies |
 | `~/.config/minohomo/current.yaml` | Local generated config, passed to the privileged installer |
-| `/etc/mihomo/config.yaml` | Installed config, read by the system Mihomo daemon |
+| `/var/lib/minohomo/mihomo` | Managed runtime binary, independent of the system Mihomo package |
+| `/var/lib/minohomo/config.yaml` | Installed config, read by `minohomo.service` |
 | `~/.config/minohomo/GeoSite.dat` | Local geosite database, copied by the privileged installer |
-| `/etc/mihomo/GeoSite.dat` | Installed system geosite database |
+| `/var/lib/minohomo/GeoSite.dat` | Installed system geosite database |
 
 The config directory is mode `0700`; files created by minohomo are mode `0600`. Source caches and backups contain credentials. The Mihomo daemon must have permission to read them.
 
-The default directory is `$HOME/.config/minohomo`. Use `--config-dir /absolute/path` to change it. `output: current.yaml` resolves relative to that directory; absolute local output paths are also supported. The local geosite database follows the output directory. The built-in installer always targets `/etc/mihomo/config.yaml` and `mihomo.service`; use a custom `reload-command` for a different deployment. `mihomo-binary` controls local validation only; privileged validation always uses `/usr/bin/mihomo`.
+The default directory is `$HOME/.config/minohomo`. Use `--config-dir /absolute/path` to change it. `output: current.yaml` resolves relative to that directory; absolute local output paths are also supported. The local geosite database follows the output directory. The built-in installer always targets `/var/lib/minohomo/config.yaml` and `minohomo.service`; use a custom `reload-command` for a different deployment. The managed core lives at `/var/lib/minohomo/mihomo`. The old default `mihomo-binary: /usr/bin/mihomo` maps to the managed path for existing configs. An explicit different `mihomo-binary` still overrides local validation for custom `reload-command` deployments; privileged validation always uses the managed core.
 
 ### Base settings and proxy overrides
 
@@ -299,7 +339,7 @@ minohomo stop
 minohomo restart
 ```
 
-These commands invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop|restart mihomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
+These commands invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop|restart minohomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
 
 ### Desktop tray
 
@@ -325,7 +365,7 @@ The tray shows Mihomo's running/stopped state, current mode, and selected proxy.
 
 - Switch between Rule, Global, and Direct modes.
 - Select a proxy from the running `PROXY` group, or `GLOBAL` in Global mode.
-- Enable, disable, or restart the system `mihomo.service`.
+- Enable, disable, or restart the system `minohomo.service`.
 - Open the terminal dashboard in your preferred terminal emulator.
 
 The **Open dashboard** menu item launches the same profile's TUI in a new terminal. Set the top-level terminal preference in `config.yaml`:
@@ -458,7 +498,7 @@ curl --noproxy '' --proxy http://127.0.0.1:7897 --max-time 20 -I https://google.
 curl --noproxy '*' --max-time 20 -IL https://google.com
 
 # Service logs and routes
-sudo journalctl -u mihomo.service -b -n 150 --no-pager
+sudo journalctl -u minohomo.service -b -n 150 --no-pager
 ip -brief address
 ip rule
 ip route show table all
@@ -493,7 +533,7 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-The optional real-database test uses the installed `/usr/bin/mihomo` and writes only to a temporary directory:
+The optional real-database test uses the installed `/var/lib/minohomo/mihomo` and writes only to a temporary directory:
 
 ```sh
 MINOHOMO_TEST_GEOSITE=/path/to/GeoSite.dat \
@@ -506,7 +546,7 @@ Tests require neither root nor a running daemon.
 
 This program is vibecoded. I provided a lot of guidance for AI agent on how the program should function and the result is pretty much exactly what I wanted.
 
-In theory it should be safe to use, because its only task is to store your proxies and generate ~/.config/minohomo/current.yaml. The optional tray and its config watcher run in the background alongside the system Mihomo service that the user must install as a prerequisite. However, I did NOT read any code, so no warranty.
+In theory it should be safe to use, because its only task is to store your proxies and generate ~/.config/minohomo/current.yaml. The optional tray and its config watcher run in the background alongside the managed core in `minohomo.service`. Core updates download and install an executable through sudo. However, I did NOT read any code, so no warranty.
 
 ## License
 

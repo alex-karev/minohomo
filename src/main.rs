@@ -1,5 +1,6 @@
 mod api;
 mod apply;
+mod core;
 mod geosite;
 #[cfg(test)]
 mod integration_tests;
@@ -41,6 +42,11 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Inspect or update the managed Mihomo core
+    Core {
+        #[command(subcommand)]
+        command: core::Action,
+    },
     /// Run the desktop tray or synchronize its systemd user service
     Tray {
         #[command(subcommand)]
@@ -104,7 +110,7 @@ enum Action {
         #[arg(value_parser = parse_source_name)]
         new_name: Option<String>,
     },
-    /// Install a generated config into /etc/mihomo and restart the system service (root)
+    /// Install config into /var/lib/minohomo and restart minohomo.service (root)
     Apply {
         /// Generated Mihomo config to install
         #[arg(long)]
@@ -112,6 +118,12 @@ enum Action {
         /// Optional local geosite database to install alongside the config
         #[arg(long)]
         geosite: Option<PathBuf>,
+        /// Version metadata URL used if the managed core is missing
+        #[arg(long, default_value = core::VERSION_URL)]
+        core_version_url: String,
+        /// Archive URL template used if the managed core is missing
+        #[arg(long, default_value = core::DOWNLOAD_URL)]
+        core_download_url: String,
     },
     /// Fetch sources, regenerate config, validate it, and apply it through sudo
     Update {
@@ -227,8 +239,37 @@ fn run(cli: Cli) -> Result<()> {
 }
 fn run_action(config_dir: Option<PathBuf>, command: Action) -> Result<()> {
     // The privileged installer never loads user settings or initializes root's config.
-    if let Action::Apply { config, geosite } = &command {
-        return apply::run(config, geosite.as_deref());
+    if let Action::Apply {
+        config,
+        geosite,
+        core_version_url,
+        core_download_url,
+    } = &command
+    {
+        return apply::run(
+            config,
+            geosite.as_deref(),
+            core_version_url,
+            core_download_url,
+        );
+    }
+    if let Action::Core { command } = &command {
+        match command {
+            core::Action::Version => {
+                println!("{}", core::version()?);
+                return Ok(());
+            }
+            core::Action::Update {
+                version_url,
+                download_url,
+            } if unsafe { libc::geteuid() } == 0 => {
+                return core::update(
+                    version_url.as_deref().unwrap_or(core::VERSION_URL),
+                    download_url.as_deref().unwrap_or(core::DOWNLOAD_URL),
+                );
+            }
+            _ => {}
+        }
     }
     if matches!(command, Action::Start | Action::Stop | Action::Restart) {
         let action = if matches!(command, Action::Start) {
@@ -260,6 +301,21 @@ fn run_action(config_dir: Option<PathBuf>, command: Action) -> Result<()> {
         && let Err(error) = tray::sync(&config_dir)
     {
         eprintln!("warning: cannot synchronize tray service: {error:#}");
+    }
+    if let Action::Core {
+        command: core::Action::Update {
+            version_url,
+            download_url,
+        },
+    } = &command
+    {
+        let settings = store.settings()?;
+        return core::update(
+            version_url.as_deref().unwrap_or(&settings.core_version_url),
+            download_url
+                .as_deref()
+                .unwrap_or(&settings.core_download_url),
+        );
     }
     if let Action::Geosite { command } = &command {
         return geosite::run(&store, command);
@@ -297,6 +353,7 @@ fn run_action(config_dir: Option<PathBuf>, command: Action) -> Result<()> {
     let mut state = store.state()?;
     match command {
         Action::Tray { .. }
+        | Action::Core { .. }
         | Action::Geosite { .. }
         | Action::Apply { .. }
         | Action::Ping
@@ -664,6 +721,7 @@ fn update(store: &Store, state: &mut State, target: Target, no_sync: bool) -> Re
         .output
         .parent()
         .context("output has no directory")?;
+    core::ensure_local(&settings)?;
     println!("Validating with Mihomo...");
     // The daemon keeps reading the old config until validation succeeds.
     let status = Command::new(&settings.mihomo_binary)
@@ -707,7 +765,14 @@ fn reload(settings: &Settings, saved: &str) -> Result<()> {
         command
     } else {
         let mut command = sudo_self()?;
-        command.arg("apply").arg("--config").arg(&settings.output);
+        command
+            .arg("apply")
+            .arg("--config")
+            .arg(&settings.output)
+            .arg("--core-version-url")
+            .arg(&settings.core_version_url)
+            .arg("--core-download-url")
+            .arg(&settings.core_download_url);
         let database = settings
             .output
             .parent()
@@ -723,7 +788,7 @@ fn reload(settings: &Settings, saved: &str) -> Result<()> {
     })?;
     ensure!(
         status.success(),
-        "{saved} saved locally, but apply/reload failed; retry with 'minohomo update --no-sync' and check 'systemctl status mihomo.service'"
+        "{saved} saved locally, but apply/reload failed; retry with 'minohomo update --no-sync' and check 'systemctl status minohomo.service'"
     );
     println!("Mihomo apply command succeeded.");
     Ok(())
@@ -782,6 +847,26 @@ mod tests {
             assert!(Cli::try_parse_from(argv).is_ok());
         }
         assert!(Cli::try_parse_from(["minohomo", "geosite", "wrong"]).is_err());
+    }
+    #[test]
+    fn core_syntax() {
+        for args in [
+            vec!["minohomo", "core", "version"],
+            vec!["minohomo", "core", "update"],
+            vec![
+                "minohomo",
+                "core",
+                "update",
+                "--version-url",
+                "https://mirror.test/version.txt",
+                "--download-url",
+                "https://mirror.test/{artifact}-{version}.{ext}",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+        assert!(Cli::try_parse_from(["minohomo", "core"]).is_err());
+        assert!(Cli::try_parse_from(["minohomo", "core", "wrong"]).is_err());
     }
     #[test]
     fn apply_syntax() {

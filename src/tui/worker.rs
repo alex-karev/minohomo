@@ -30,6 +30,7 @@ pub(super) struct Status {
     pub sources: Vec<storage::Source>,
     pub tray_enabled: bool,
     pub service: String,
+    pub core: String,
     pub mode: String,
     pub group: String,
     pub current: String,
@@ -54,6 +55,7 @@ fn status(root: &Path) -> Result<Status> {
         sources: state.sources,
         tray_enabled: settings.tray_enabled,
         service: crate::tray::service_state(),
+        core: crate::core::version().unwrap_or_else(|_| "unavailable".into()),
         geosite,
         ..Default::default()
     };

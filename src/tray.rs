@@ -188,7 +188,7 @@ pub(crate) fn service_state() -> String {
     match Command::new("/usr/bin/systemctl")
         .args([
             "show",
-            "mihomo.service",
+            "minohomo.service",
             "--property=ActiveState",
             "--value",
         ])
@@ -246,9 +246,9 @@ fn execute(root: &Path, request: Request) -> Result<()> {
                 "unsupported service action"
             );
             let output = Command::new("/usr/bin/systemctl")
-                .args(["--system", action, "mihomo.service"])
+                .args(["--system", action, "minohomo.service"])
                 .output()
-                .context("cannot control mihomo.service")?;
+                .context("cannot control minohomo.service")?;
             ensure!(
                 output.status.success(),
                 "Mihomo {action} failed: {}",
