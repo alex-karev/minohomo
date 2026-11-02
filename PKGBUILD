@@ -6,6 +6,8 @@ pkgdesc='Linux proxy client with a terminal dashboard, desktop tray, and managed
 arch=('x86_64' 'aarch64')
 url='https://github.com/alex-karev/minohomo'
 license=('GPL-3.0-only')
+# AWS-LC's GCC LTO objects cannot be linked by Rust's LLVM linker.
+options=('!lto')
 depends=('glibc' 'gcc-libs' 'ca-certificates' 'sudo' 'systemd')
 makedepends=('cargo' 'cmake' 'curl' 'gzip')
 optdepends=(
