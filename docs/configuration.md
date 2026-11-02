@@ -12,7 +12,8 @@ Edit the source files, not the generated Mihomo config:
 | `~/.config/minohomo/rules.yaml` | Complete routing policy and optional rule providers |
 | `~/.config/minohomo/sources.yaml` | Saved links, unique source names, internal IDs, timestamps, and cached proxies |
 | `~/.config/minohomo/current.yaml` | Local generated config, passed to the privileged installer |
-| `/var/lib/minohomo/mihomo` | Managed runtime binary, downloaded and managed by Minohomo |
+| `/usr/share/minohomo/mihomo` | Bundled core shipped by Debian/Arch packages |
+| `/var/lib/minohomo/mihomo` | Runtime core, copied from the bundle on first use or replaced by an explicit core update |
 | `/var/lib/minohomo/config.yaml` | Installed config, read by `minohomo.service` |
 | `~/.config/minohomo/GeoSite.dat` | Local geosite database, copied by the privileged installer |
 | `/var/lib/minohomo/GeoSite.dat` | Installed system geosite database |
@@ -122,6 +123,8 @@ core-version-url: https://github.com/MetaCubeX/mihomo/releases/latest/download/v
 core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{version}/{artifact}-{version}.{ext}
 geosite-url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat
 ```
+
+These core endpoints control explicit `minohomo core update`, dashboard core updates, and automatic setup when neither a runtime nor a bundled core is available. Debian/Arch prefer the bundled binary and download only when both local copies are missing. NixOS disables bundling and retains download-on-first-use behavior.
 
 The version endpoint must return a tag such as `v1.19.33`. Archive templates support `{version}`, `{artifact}`, and `{ext}`. A custom version endpoint still uses GitHub archives unless you also change `core-download-url`. Core downloads require HTTPS, except HTTP on loopback for local testing. These endpoints supply executable code; trust the source.
 

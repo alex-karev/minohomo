@@ -27,7 +27,7 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          pacman -Syu --noconfirm --needed rust cmake git jq ca-certificates sudo systemd
+          pacman -Syu --noconfirm --needed rust cmake git jq ca-certificates sudo systemd curl gzip
           useradd --create-home builder
 
       - name: Check out source
@@ -70,6 +70,8 @@ jobs:
           version=$(bash -c 'source PKGBUILD; printf "%s" "$pkgver"')
           test "$(build/smoke/usr/bin/minohomo --version)" = "minohomo $version"
           test "$(build/smoke/usr/bin/minohomo core version)" = "Not installed"
+          test -x build/smoke/usr/share/minohomo/mihomo
+          build/smoke/usr/share/minohomo/mihomo -v
           test -f build/smoke/usr/lib/systemd/system/minohomo.service
           test -f build/smoke/usr/lib/systemd/user/minohomo-tray.service
           test -f build/smoke/usr/lib/systemd/user/minohomo-tray-config.service

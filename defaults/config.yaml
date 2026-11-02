@@ -7,8 +7,10 @@ tray-enabled: true
 default_terminal: null
 # Relative to the minohomo config directory.
 output: current.yaml
-# Managed core; no separate Mihomo package is required.
+# Runtime core. Debian/Arch copy the bundled core here on first use.
+# If both runtime and bundled cores are missing, download a core automatically.
 mihomo-binary: /var/lib/minohomo/mihomo
+# Endpoints for explicit core updates and missing-core download fallback.
 core-version-url: https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt
 # Placeholders: {version}, {artifact}, {ext}. Change for an archive mirror.
 core-download-url: https://github.com/MetaCubeX/mihomo/releases/download/{version}/{artifact}-{version}.{ext}

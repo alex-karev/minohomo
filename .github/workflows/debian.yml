@@ -40,7 +40,7 @@ jobs:
           apt-get update
           apt-get install --yes --no-install-recommends \
             build-essential ca-certificates cmake curl dpkg-dev git jq \
-            pkg-config xz-utils zstd
+            pkg-config gzip xz-utils zstd
           test "$(dpkg --print-architecture)" = "${{ matrix.arch }}"
 
       - name: Check out source
@@ -112,6 +112,8 @@ jobs:
           test -f target/deb-smoke/usr/lib/systemd/user/minohomo-tray-config.path
           test -f target/deb-smoke/usr/share/icons/hicolor/150x150/apps/minohomo.png
           test ! -e target/deb-smoke/etc
+          test -x target/deb-smoke/usr/share/minohomo/mihomo
+          target/deb-smoke/usr/share/minohomo/mihomo -v
           test -f target/deb-smoke/usr/lib/systemd/system/minohomo.service
           grep -q '^ExecStart=/var/lib/minohomo/mihomo ' target/deb-smoke/usr/lib/systemd/system/minohomo.service
           test ! -e target/deb-smoke/var/lib/minohomo

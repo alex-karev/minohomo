@@ -97,7 +97,7 @@ sudo minohomo apply --config PATH [--geosite PATH]
 | `update --no-sync` | Regenerates from cached proxies, validates, installs, and restarts without fetching sources. Cannot be combined with a source name. |
 | `core version` | Prints the managed core version, or `Not installed` when absent. |
 | `core update [--version-url URL] [--download-url TEMPLATE]` | Installs the latest core. Restarts an already-running service. |
-| `apply --config PATH [--geosite PATH]` | Root-only installer used by `update`. Installs a missing core, validates, installs to `/var/lib/minohomo`, and restarts `minohomo.service`. |
+| `apply --config PATH [--geosite PATH]` | Root-only installer used by `update`. Copies a missing runtime core from the package bundle, or downloads one if both local copies are missing, validates, installs to `/var/lib/minohomo`, and restarts `minohomo.service`. |
 
 Examples:
 
@@ -171,7 +171,7 @@ minohomo stop
 minohomo restart
 ```
 
-These commands invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop|restart minohomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
+For Debian/Arch builds, these commands first copy the bundled core into `/var/lib/minohomo` if it is missing. If neither the runtime core nor the bundle exists, they download a core automatically. They invoke the same executable through sudo, then run `/usr/bin/systemctl start|stop|restart minohomo.service`. They do not read root's minohomo config, enable the service at boot, or install a generated file. Run `update` first to deploy a config. They are independent of a custom `reload-command`.
 
 ### Desktop tray
 

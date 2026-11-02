@@ -20,7 +20,7 @@ pub fn run(
         unsafe { libc::geteuid() } == 0,
         "apply requires root; run it with sudo"
     );
-    // Check input paths before downloading anything.
+    // Check input paths before installing the core.
     read_bounded(config, MAX_CONFIG)?;
     if let Some(path) = geosite {
         read_bounded(path, MAX_DATABASE)?;
@@ -54,6 +54,7 @@ pub fn service(action: &str) -> Result<()> {
         ["start", "stop", "restart"].contains(&action),
         "unsupported service action"
     );
+    crate::core::ensure_root(crate::core::VERSION_URL, crate::core::DOWNLOAD_URL)?;
     let status = Command::new("/usr/bin/systemctl")
         .args([action, "minohomo.service"])
         .status()

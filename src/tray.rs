@@ -245,10 +245,22 @@ fn execute(root: &Path, request: Request) -> Result<()> {
                 ["start", "stop", "restart"].contains(&action),
                 "unsupported service action"
             );
-            let output = Command::new("/usr/bin/systemctl")
-                .args(["--system", action, "minohomo.service"])
-                .output()
-                .context("cannot control minohomo.service")?;
+            let output =
+                if cfg!(feature = "bundled-core") && !Path::new(crate::core::BINARY).is_file() {
+                    // First use also needs to copy the packaged core. Let polkit
+                    // authorize the same root CLI path used by terminal controls.
+                    Command::new("/usr/bin/pkexec")
+                        .arg(std::env::current_exe().context("cannot locate minohomo executable")?)
+                        .arg(action)
+                        .output()
+                } else {
+                    Command::new("/usr/bin/systemctl")
+                        .args(["--system", action, "minohomo.service"])
+                        .output()
+                }
+                .context(
+                    "cannot control minohomo.service; first-use tray setup requires polkit/pkexec",
+                )?;
             ensure!(
                 output.status.success(),
                 "Mihomo {action} failed: {}",
