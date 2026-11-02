@@ -751,9 +751,11 @@ fn update(store: &Store, state: &mut State, target: Target, no_sync: bool) -> Re
     reload(&settings, "config and source cache")
 }
 fn http_client(settings: &Settings) -> Result<Client> {
+    let user_agent = reqwest::header::HeaderValue::from_str(&settings.subscription_user_agent)
+        .context("invalid subscription-user-agent")?;
     Ok(Client::builder()
         .timeout(Duration::from_secs(settings.request_timeout_seconds))
-        .user_agent("V2rayNG/1.8.12")
+        .user_agent(user_agent)
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()?)
 }
@@ -798,6 +800,21 @@ fn reload(settings: &Settings, saved: &str) -> Result<()> {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+    #[test]
+    fn subscription_user_agent_rejects_header_injection() {
+        let mut settings: Settings =
+            serde_yaml::from_str(include_str!("../defaults/config.yaml")).unwrap();
+        settings.subscription_user_agent = "CustomClient/2.0".into();
+        assert!(http_client(&settings).is_ok());
+        settings.subscription_user_agent = "CustomClient/2.0\r\nX-Injected: value".into();
+        assert!(
+            http_client(&settings)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid subscription-user-agent")
+        );
+    }
+
     #[test]
     fn clap_definition() {
         Cli::command().debug_assert();
