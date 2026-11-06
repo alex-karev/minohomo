@@ -39,10 +39,17 @@
 ## About the project
 
 <div align="center">
-  <a href="src/assets/screenshot.png">
-    <img src="src/assets/screenshot.png" alt="Minohomo terminal dashboard showing core status, public IP, and proxy delay results" width="960">
+  <a href="src/assets/screenshot1.png">
+    <img src="src/assets/screenshot1.png" alt="Minohomo terminal dashboard showing core status, public IP, and proxy delay results" width="960">
   </a>
 </div>
+
+<div align="center">
+  <a href="src/assets/screenshot2.png">
+    <img src="src/assets/screenshot2.png" alt="Mihomo connection monitor" width="960">
+  </a>
+</div>
+
 
 Minohomo manages your proxy connections from one place. Import subscriptions or individual links, choose an outbound node, switch routing modes, test connections, and control the core without leaving your terminal. The optional desktop tray keeps everyday controls a click away.
 
