@@ -16,19 +16,22 @@ The **Minohomo** application-menu shortcut opens a new terminal using the same l
 
 Run it as your normal user in an interactive terminal. When stdin or stdout is not a terminal, the dashboard exits with a message instead of emitting terminal control codes.
 
-The layout has three panels:
+The layout has four panels:
 
 - **Sources:** saved subscriptions and independent proxies, cached node counts, last update times. Add a URL/link, optionally name it, remove a selected source, or update one/all sources. Source links and credentials stay hidden outside the add dialog.
 - **Network:** proxy delay tests, sorted fastest first, plus an on-demand public IP and approximate location lookup.
-- **Actions:** every operation in one browsable list, including applying cached sources, core updates, geosite download with/without reload, editor shortcuts, tray preference, and system service controls.
+- **Connections (3):** automatically updated connections, newest first, with green **Open** and red **Closed** indicators. Shows destination, transport/inbound type, chain, download/upload totals, and speeds on wider terminals. Enter opens scrollable details including rule, DNS mode, sniffed host, source/destination addresses, inbound fields, and process data when Mihomo supplies them.
+- **Actions (4):** every operation in one browsable list, including applying cached sources, core updates, geosite download with/without reload, editor shortcuts, tray preference, and system service controls.
 
 The header shows the system Mihomo service state, running mode, selected proxy, installed core version, saved tray preference, geosite file size, and config/rules editor shortcuts. It refreshes every few seconds. An unavailable API does not prevent source management, editing, or service control.
 
 | Key | Action |
 | --- | --- |
-| `Tab`, `Shift-Tab`, `1`/`2`/`3` | Switch panels |
+| `Tab`, `Shift-Tab`, `1`/`2`/`3`/`4` | Switch panels |
 | `Up`/`Down`, `j`/`k`, `PgUp`/`PgDn`, `Home`/`End` | Navigate the active list |
 | `Enter` in Actions | Run selected action |
+| `Enter` in Connections | Open selected connection details; Enter or Esc closes them |
+| `Ctrl-X` in Connections or connection details | Copy connection details through terminal clipboard support (OSC 52) |
 | `a`, `d` | Add or remove a source |
 | `n` in Sources | Rename the selected source |
 | `u`, `U` | Update selected source or all sources |
@@ -51,7 +54,11 @@ Status, ping, mode/proxy changes, and IP lookups run in a background worker. Whi
 
 Public IP lookup contacts **https://ipwho.is/** only when requested. The provider sees the request's outbound IP. The result includes the IP, approximate location, ISP, and lookup time. It follows system routing, TUN, and proxy environment settings; it does not prove that Mihomo carried the request. Failed/rate-limited requests show an error without discarding the last successful result. No lookup runs automatically at startup.
 
-The dashboard inherits the terminal's foreground/background colors. Selection uses reverse video; headings use bold/dim text. No hardcoded light/dark palette or color-detection request. Minimum size is 64 columns by 22 rows. The UI restores the terminal on normal exit, errors, and panics.
+Connections poll the authenticated Mihomo API in a separate background worker, roughly once per second plus request time. Updates continue during ping and IP lookups and while viewing details. Selection follows connection IDs as new entries arrive. History exists only in memory for this dashboard session; all observed open connections and up to 1000 recently started closed connections are retained. Mihomo does not provide past closed connections through this endpoint. Connections that open and close between polls can be missed. Closed totals are the last observed values, not guaranteed final totals; speeds are calculated from counter differences between polls. API failures leave the last known list/status intact and show a stale warning rather than falsely marking connections closed.
+
+Ctrl-X sends details using OSC 52. Clipboard access must be supported and permitted by the terminal and any terminal multiplexer. The application cannot confirm that the terminal accepted the copy. Connection details include browsing destinations, addresses, process paths, and inbound usernames; review them before sharing.
+
+The dashboard inherits the terminal's foreground/background colors, except for green/red connection status indicators. Selection uses reverse video; headings use bold/dim text. No hardcoded light/dark background palette or color-detection request. Minimum size is 64 columns by 22 rows. The UI restores the terminal on normal exit, errors, and panics.
 
 ## Commands
 
