@@ -153,7 +153,7 @@ minohomo tray enable
 minohomo tray disable
 ```
 
-Set `default_terminal` in your settings to choose the terminal opened by the tray. Leave it `null` to use the system default.
+Set `default-terminal` in your settings to choose the terminal opened by the tray. Leave it `null` to use the system default.
 
 ### Common CLI commands
 

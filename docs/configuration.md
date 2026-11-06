@@ -119,11 +119,16 @@ HTTP downloads verify certificates, enforce timeouts, follow at most five redire
 
 ```yaml
 tray-enabled: true
-default_terminal: null
-# default_terminal: "kitty --single-instance"
-# default_terminal: "gnome-terminal"
-# default_terminal: "konsole --separate"
+default-terminal: null
+# default-terminal: "kitty --single-instance"
+# default-terminal: "gnome-terminal"
+# default-terminal: "konsole --separate"
+default-editor: null
+# default-editor: "nvim"
+# default-editor: "code --wait"
 ```
+
+The dashboard reloads `default-editor` each time you open config.yaml or rules.yaml. A nonempty command overrides `$VISUAL`, then `$EDITOR`, then `sensible-editor`. Unset, null, or blank uses that environment fallback. Commands accept quoted paths and arguments without a shell. GUI editors need a wait flag, such as `code --wait`, to keep the dashboard suspended until editing finishes.
 
 The tray reloads the terminal preference on each **Open dashboard** click. The **Minohomo** application-menu shortcut and `minohomo --window` use the same launcher and preference. Null or empty selects the system default. See [desktop tray usage](usage.md#desktop-tray) for terminal detection and service controls.
 

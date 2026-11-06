@@ -92,13 +92,13 @@ journalctl --user -u minohomo-tray.service -u minohomo-tray-config.service
 
 The tray remains usable when the core is stopped. Automatic user-service management uses only the default profile. For another profile, run `minohomo --config-dir /absolute/path tray run` in the foreground.
 
-If **Open dashboard** fails, check `default_terminal` and confirm that the terminal emulator is installed. The tray shows launch errors in its menu. Errors after startup appear in the user journal. See [terminal preferences](configuration.md#tray-and-terminal-preferences).
+If **Open dashboard** fails, check `default-terminal` and confirm that the terminal emulator is installed. The tray shows launch errors in its menu. Errors after startup appear in the user journal. See [terminal preferences](configuration.md#tray-and-terminal-preferences).
 
 ## Dashboard or editor problems
 
 The dashboard requires interactive stdin/stdout and a terminal at least 64 columns by 22 rows. Use a CLI subcommand in scripts or redirected sessions.
 
-Editors use `$VISUAL`, then `$EDITOR`, then `sensible-editor`. GUI editors need a wait flag, such as `EDITOR='code --wait'`, so the dashboard resumes after editing. Commands support quoted arguments, not shell pipelines or expansions.
+Editors use a nonempty `default-editor` command from config.yaml, otherwise `$VISUAL`, then `$EDITOR`, then `sensible-editor`. GUI editors need a wait flag, such as `EDITOR='code --wait'`, so the dashboard resumes after editing. Commands support quoted arguments, not shell pipelines or expansions.
 
 ## Geosite validation fails
 

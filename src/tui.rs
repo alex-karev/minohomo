@@ -119,7 +119,7 @@ const ACTIONS: &[(Operation, &str, &str)] = &[
     (
         Operation::Config,
         "c  Edit config.yaml",
-        "Open with $VISUAL, $EDITOR, or sensible-editor.",
+        "Open with default-editor, $VISUAL, $EDITOR, or sensible-editor.",
     ),
     (
         Operation::Rules,
@@ -859,7 +859,16 @@ fn resume(terminal: &mut DefaultTerminal) -> Result<()> {
     terminal.clear()?;
     Ok(())
 }
-fn editor_command(path: &Path) -> Result<Command> {
+fn editor_command(root: &Path, path: &Path) -> Result<Command> {
+    let settings = Store::load_settings(root)?;
+    if let Some(editor) = settings
+        .default_editor
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return build_editor(editor, path);
+    }
     let editor = std::env::var("VISUAL")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -872,7 +881,8 @@ fn editor_command(path: &Path) -> Result<Command> {
     build_editor(&editor, path)
 }
 fn build_editor(editor: &str, path: &Path) -> Result<Command> {
-    let words = shell_words::split(editor).context("invalid quoting in VISUAL/EDITOR")?;
+    let words = shell_words::split(editor)
+        .context("invalid quoting in editor command (default-editor or VISUAL/EDITOR)")?;
     let program = words.first().context("editor command is empty")?;
     let mut command = Command::new(program);
     command.args(&words[1..]).arg(path);
@@ -889,7 +899,7 @@ fn foreground(terminal: &mut DefaultTerminal, root: &Path, action: Foreground) -
                 command.arg("--config-dir").arg(root).args(args);
                 command
             }
-            Foreground::Editor(file) => editor_command(&root.join(file))?,
+            Foreground::Editor(file) => editor_command(root, &root.join(file))?,
         };
         let status = command.status().context("cannot launch command/editor")?;
         ensure!(status.success(), "command exited with {status}");

@@ -12,7 +12,7 @@ minohomo
 minohomo --config-dir /absolute/path
 ```
 
-The **Minohomo** application-menu shortcut opens a new terminal using the same launcher as the tray. Run `minohomo --window` to do this from the CLI. Both respect `default_terminal` in `config.yaml`; the launcher works without the tray running.
+The **Minohomo** application-menu shortcut opens a new terminal using the same launcher as the tray. Run `minohomo --window` to do this from the CLI. Both respect `default-terminal` in `config.yaml`; the launcher works without the tray running.
 
 Run it as your normal user in an interactive terminal. When stdin or stdout is not a terminal, the dashboard exits with a message instead of emitting terminal control codes.
 
@@ -48,7 +48,7 @@ The header shows the system Mihomo service state, running mode, selected proxy, 
 
 In the add form, `Tab` moves between the name, link, and HTTP(S)-proxy checkbox. Paste a subscription URL or direct proxy link. Use the checkbox only when an HTTP(S) link describes a proxy endpoint rather than a subscription. `Space` toggles it, `Ctrl-U` clears a text field, and `Enter` saves. Deletion, stop, and restart ask for confirmation; only `y` confirms, while `Enter` cancels.
 
-Editors use `$VISUAL`, then `$EDITOR`, then Debian's `sensible-editor`. Editor arguments and quoted paths work without a shell. For GUI editors, configure a wait flag, for example `EDITOR='code --wait'`, so the dashboard resumes after editing. Closing the editor returns directly to the dashboard. Apply cached sources from Actions to deploy config/rule edits without fetching subscriptions.
+Editors use `default-editor` from config.yaml when nonempty, otherwise `$VISUAL`, then `$EDITOR`, then Debian's `sensible-editor`. Editor arguments and quoted paths work without a shell. For GUI editors, configure a wait flag, for example `EDITOR='code --wait'`, so the dashboard resumes after editing. Closing the editor returns directly to the dashboard. Apply cached sources from Actions to deploy config/rule edits without fetching subscriptions.
 
 Status, ping, mode/proxy changes, and IP lookups run in a background worker. While a network action runs, you can browse panels or quit. Updates, geosite downloads, tray changes, and service commands temporarily restore the normal terminal, run the existing CLI, and show its output. Sudo can prompt there. Press Enter afterward to return. The dashboard does not hold the source-cache lock between actions, so another CLI process can work on the same profile.
 
@@ -89,7 +89,7 @@ sudo minohomo apply --config PATH [--geosite PATH]
 
 | Command | Behavior |
 | --- | --- |
-| `--window` | Opens the dashboard in a new terminal using `default_terminal` or the system default. Used by the application-menu shortcut. |
+| `--window` | Opens the dashboard in a new terminal using `default-terminal` or the system default. Used by the application-menu shortcut. |
 | `init` | Creates missing config files without overwriting existing ones. Other application commands also initialize missing files. |
 | `add` | Validates and saves links. Does not fetch subscriptions or reload Mihomo. HTTP(S) URLs mean subscriptions unless `--proxy` is supplied. |
 | `list` | Shows unique source names, links, last successful update times in UTC, and cached proxy counts. |
@@ -214,14 +214,14 @@ The tray shows Mihomo's running/stopped state, current mode, and selected proxy.
 The **Open dashboard** menu item launches the same profile's TUI in a new terminal. Set the top-level terminal preference in `config.yaml`:
 
 ```yaml
-default_terminal: null             # System default
-# default_terminal: "kitty"
-# default_terminal: "gnome-terminal"
-# default_terminal: "konsole --separate"
-# default_terminal: "alacritty"
+default-terminal: null             # System default
+# default-terminal: "kitty"
+# default-terminal: "gnome-terminal"
+# default-terminal: "konsole --separate"
+# default-terminal: "alacritty"
 ```
 
-Unset, null, or empty uses `xdg-terminal-exec` when available, then Debian's `x-terminal-emulator` alternative, then `$TERMINAL` as a fallback. Custom commands support quoted paths and arguments without a shell. The launcher supplies the emulator's execution flag; a custom command can include an explicit trailing `--`, `-e`, `-x`, or `--execute` flag to override it. The tray reads this setting on each click. `default-terminal` is also accepted as an alias.
+Unset, null, or empty uses `xdg-terminal-exec` when available, then Debian's `x-terminal-emulator` alternative, then `$TERMINAL` as a fallback. Custom commands support quoted paths and arguments without a shell. The launcher supplies the emulator's execution flag; a custom command can include an explicit trailing `--`, `-e`, `-x`, or `--execute` flag to override it. The tray reads this setting on each click.
 
 The terminal starts in its own transient systemd user service, so disabling the tray does not close the dashboard. Launch failures appear in the tray's error entry; errors after terminal startup appear in the user journal. This requires a working systemd user manager and an installed terminal emulator.
 

@@ -4,7 +4,10 @@ tray-enabled: true
 # Tray dashboard terminal. null/empty uses the system default.
 # Examples: "kitty", "gnome-terminal", "konsole", "alacritty".
 # Extra arguments are supported, e.g. "kitty --single-instance".
-default_terminal: null
+default-terminal: null
+# Dashboard editor. null/empty uses $VISUAL, then $EDITOR, then sensible-editor.
+# Extra arguments are supported, e.g. "code --wait".
+default-editor: null
 # Relative to the minohomo config directory.
 output: current.yaml
 # Runtime core. Debian/Arch copy the bundled core here on first use.
