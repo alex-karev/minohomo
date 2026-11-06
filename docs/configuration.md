@@ -75,6 +75,7 @@ You can add `rule-providers` to `rules.yaml`. HTTP providers with refresh interv
 ## Default network behavior
 
 - TUN uses interface `mihomo`, the `gvisor` userspace stack, and auto-redirect disabled.
+- Mihomo IPv6 connections and DNS AAAA answers are disabled by default to avoid stalls on unreachable IPv6 endpoints. With working IPv6 connectivity, opt in by setting both `mihomo.ipv6` and `mihomo.dns.ipv6` to `true`. IPv6-only destinations require IPv6 support. These settings do not disable system-wide IPv6.
 - Local, private, loopback, link-local, multicast, and Tailscale IPv4/IPv6 ranges follow normal system routes.
 - Local domains, Chinese and Russian domain suffixes and geosite categories, Alibaba, and Tencent use DIRECT.
 - Unmatched traffic uses the selected node in `PROXY`.

@@ -22,6 +22,7 @@ ip route show table all
 
 - **Proxy works, TUN times out:** check `tun.enable`, use `stack: gvisor`, and inspect routes and logs. An interface existing does not prove traffic reaches the outbound handler.
 - **TUN connects to some sites but hangs on TLS elsewhere:** check sniffing and destination override. Set `override-destination: true` globally and for HTTP, TLS, and QUIC. Per-protocol values override the global value.
+- **WeChat file transfers or other DIRECT connections stall with an IPv6 remote destination:** set both `mihomo.ipv6` and `mihomo.dns.ipv6` to `false`, apply with `minohomo update --no-sync`, then restart the affected application. Sniffing can replace an application's original IPv4 destination with a hostname that resolves to an unreachable IPv6 endpoint. New profiles disable IPv6 by default; upgrades preserve existing settings.
 - **DIRECT reports a DNS error:** check resolver reachability and bootstrap dependencies. Literal-IP DoH avoids resolving a resolver hostname through an unavailable or intercepted OS DNS path.
 - **Tailscale names fail:** check that Tailscale is running, the resolver uses `#tailscale0`, and the fake-IP filter includes `+.ts.net`.
 - **REALITY authentication fails:** verify the public key, short ID, SNI, fingerprint, and ML-KEM flag against the same source link.

@@ -1374,6 +1374,8 @@ mod tests {
             .collect();
         assert_eq!(names.len(), 3);
         assert_eq!(generated["mixed-port"], 7897);
+        assert_eq!(generated["ipv6"], false);
+        assert_eq!(generated["dns"]["ipv6"], false);
         assert_eq!(generated["tun"]["device"], "mihomo");
         assert_eq!(generated["tun"]["stack"], "gvisor");
         assert_eq!(generated["tun"]["auto-redirect"], false);

@@ -42,7 +42,8 @@ mihomo:
   bind-address: 127.0.0.1
   mode: rule
   log-level: info
-  ipv6: true
+  # Opt in only with working IPv6 connectivity; unreachable CDN IPv6 can stall apps.
+  ipv6: false
   external-controller: 127.0.0.1:9090
   # init replaces this placeholder with a random API secret.
   secret: '__MINOHOMO_API_SECRET__'
@@ -83,7 +84,8 @@ mihomo:
   dns:
     enable: true
     listen: 127.0.0.1:1053
-    ipv6: true
+    # Keep disabled with the top-level ipv6 setting to avoid AAAA answers.
+    ipv6: false
     enhanced-mode: fake-ip
     fake-ip-range: 198.18.0.1/16
     # +. matches every subdomain depth, including host.tailnet.ts.net.
