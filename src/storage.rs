@@ -19,8 +19,11 @@ pub struct Settings {
     #[serde(default = "default_tray_enabled")]
     pub tray_enabled: bool,
     /// Terminal command used by the tray to open the dashboard.
-    #[serde(default, rename = "default_terminal", alias = "default-terminal")]
+    #[serde(default)]
     pub default_terminal: Option<String>,
+    /// Editor command used by the dashboard; empty/unset follows VISUAL/EDITOR.
+    #[serde(default)]
+    pub default_editor: Option<String>,
     pub output: PathBuf,
     #[serde(default = "crate::core::default_binary")]
     pub mihomo_binary: PathBuf,

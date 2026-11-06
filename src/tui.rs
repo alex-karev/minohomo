@@ -1,3 +1,4 @@
+mod connections;
 mod input;
 mod ui;
 mod worker;
@@ -118,7 +119,7 @@ const ACTIONS: &[(Operation, &str, &str)] = &[
     (
         Operation::Config,
         "c  Edit config.yaml",
-        "Open with $VISUAL, $EDITOR, or sensible-editor.",
+        "Open with default-editor, $VISUAL, $EDITOR, or sensible-editor.",
     ),
     (
         Operation::Rules,
@@ -179,6 +180,10 @@ enum ChoiceValue {
     Service(&'static str),
 }
 enum Modal {
+    Connection {
+        connection: Box<connections::Connection>,
+        scroll: u16,
+    },
     Add(AddForm),
     Rename(RenameForm),
     Confirm {
@@ -203,6 +208,8 @@ struct App {
     actions: ListState,
     pings: Vec<(String, Option<u64>)>,
     ping_state: TableState,
+    connections: connections::History,
+    connection_state: TableState,
     ip: String,
     modal: Option<Modal>,
     notice: String,
@@ -227,6 +234,7 @@ impl App {
             root, tab: 0, status: Status::default(), sources: TableState::default().with_selected(0),
             actions: ListState::default().with_selected(Some(0)), pings: vec![], ping_state: TableState::default().with_selected(0),
             ip: "Not requested. Press i to contact ipwho.is.\nThe provider sees your outbound IP. Location is approximate.".into(),
+            connections: connections::History::default(), connection_state: TableState::default(),
             modal: None, notice, failed: false, busy: None, tick: Instant::now(), jobs, messages,
         }
     }
@@ -262,6 +270,51 @@ impl App {
     fn receive(&mut self) {
         while let Ok(message) = self.messages.try_recv() {
             match message {
+                Message::Connections(result, sampled) => {
+                    match result {
+                        Ok(snapshot) => {
+                            let selected_id = self
+                                .connection_state
+                                .selected()
+                                .and_then(|i| self.connections.entries.get(i))
+                                .map(|c| c.id.clone());
+                            self.connections.update(snapshot, sampled);
+                            let index = selected_id
+                                .and_then(|id| {
+                                    self.connections.entries.iter().position(|c| c.id == id)
+                                })
+                                .unwrap_or_else(|| {
+                                    self.connection_state
+                                        .selected()
+                                        .unwrap_or(0)
+                                        .min(self.connections.entries.len().saturating_sub(1))
+                                });
+                            self.connection_state
+                                .select(if self.connections.entries.is_empty() {
+                                    None
+                                } else {
+                                    Some(index)
+                                });
+                            if let Some(Modal::Connection { connection, .. }) = &mut self.modal {
+                                if let Some(current) = self
+                                    .connections
+                                    .entries
+                                    .iter()
+                                    .find(|c| c.id == connection.id)
+                                {
+                                    **connection = current.clone();
+                                } else if connection.open {
+                                    // A burst of closures can evict the inspected entry from history.
+                                    connection.open = false;
+                                    connection.closed_at = self.connections.updated.clone();
+                                    connection.download_speed = 0.0;
+                                    connection.upload_speed = 0.0;
+                                }
+                            }
+                        }
+                        Err(error) => self.connections.error = Some(error),
+                    }
+                }
                 Message::Status(Ok(status)) => {
                     let selected_id = self
                         .sources
@@ -487,6 +540,26 @@ impl App {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return (true, None);
         }
+        if key.code == KeyCode::Char('x') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            let connection = match &self.modal {
+                Some(Modal::Connection { connection, .. }) => Some(connection.as_ref()),
+                None if self.tab == 2 => self
+                    .connection_state
+                    .selected()
+                    .and_then(|i| self.connections.entries.get(i)),
+                _ => None,
+            };
+            if let Some(connection) = connection {
+                match connections::copy(&connection.details()) {
+                    Ok(()) => self.notify(
+                        "Copy sent to terminal clipboard (OSC 52; terminal support required).",
+                        false,
+                    ),
+                    Err(error) => self.notify(format!("Clipboard write failed: {error}"), true),
+                }
+            }
+            return (false, None);
+        }
         if let Some(modal) = self.modal.take() {
             return (false, self.modal_key(modal, key));
         }
@@ -500,11 +573,12 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return (true, None),
             KeyCode::Tab | KeyCode::BackTab => {
-                self.tab = (self.tab + if key.code == KeyCode::Tab { 1 } else { 2 }) % 3
+                self.tab = (self.tab + if key.code == KeyCode::Tab { 1 } else { 3 }) % 4
             }
             KeyCode::Char('1') => self.tab = 0,
             KeyCode::Char('2') => self.tab = 1,
             KeyCode::Char('3') => self.tab = 2,
+            KeyCode::Char('4') => self.tab = 3,
             KeyCode::Char('?') | KeyCode::F(1) => self.modal = Some(Modal::Help { scroll: 0 }),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
@@ -513,6 +587,18 @@ impl App {
             KeyCode::Home => self.move_selection(-isize::MAX),
             KeyCode::End => self.move_selection(isize::MAX),
             KeyCode::Enter if self.tab == 2 => {
+                if let Some(connection) = self
+                    .connection_state
+                    .selected()
+                    .and_then(|i| self.connections.entries.get(i))
+                {
+                    self.modal = Some(Modal::Connection {
+                        connection: Box::new(connection.clone()),
+                        scroll: 0,
+                    });
+                }
+            }
+            KeyCode::Enter if self.tab == 3 => {
                 operation = Some(ACTIONS[self.actions.selected().unwrap_or(0)].0)
             }
             KeyCode::Char('a') => operation = Some(Operation::Add),
@@ -557,6 +643,11 @@ impl App {
                 self.pings.len(),
                 delta,
             )),
+            2 => self.connection_state.select(move_index(
+                self.connection_state.selected(),
+                self.connections.entries.len(),
+                delta,
+            )),
             _ => self
                 .actions
                 .select(move_index(self.actions.selected(), ACTIONS.len(), delta)),
@@ -567,6 +658,20 @@ impl App {
             return None;
         }
         match &mut modal {
+            Modal::Connection { scroll, .. } => {
+                // Rendering clamps to the last wrapped page for the current terminal size.
+                let max = u16::MAX;
+                match key.code {
+                    KeyCode::Down | KeyCode::Char('j') => *scroll = scroll.saturating_add(1),
+                    KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+                    KeyCode::PageDown => *scroll = scroll.saturating_add(10),
+                    KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+                    KeyCode::Home => *scroll = 0,
+                    KeyCode::End => *scroll = max,
+                    KeyCode::Enter | KeyCode::Char('q') => return None,
+                    _ => {}
+                }
+            }
             Modal::Help { scroll } => {
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -754,7 +859,16 @@ fn resume(terminal: &mut DefaultTerminal) -> Result<()> {
     terminal.clear()?;
     Ok(())
 }
-fn editor_command(path: &Path) -> Result<Command> {
+fn editor_command(root: &Path, path: &Path) -> Result<Command> {
+    let settings = Store::load_settings(root)?;
+    if let Some(editor) = settings
+        .default_editor
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return build_editor(editor, path);
+    }
     let editor = std::env::var("VISUAL")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -767,7 +881,8 @@ fn editor_command(path: &Path) -> Result<Command> {
     build_editor(&editor, path)
 }
 fn build_editor(editor: &str, path: &Path) -> Result<Command> {
-    let words = shell_words::split(editor).context("invalid quoting in VISUAL/EDITOR")?;
+    let words = shell_words::split(editor)
+        .context("invalid quoting in editor command (default-editor or VISUAL/EDITOR)")?;
     let program = words.first().context("editor command is empty")?;
     let mut command = Command::new(program);
     command.args(&words[1..]).arg(path);
@@ -784,7 +899,7 @@ fn foreground(terminal: &mut DefaultTerminal, root: &Path, action: Foreground) -
                 command.arg("--config-dir").arg(root).args(args);
                 command
             }
-            Foreground::Editor(file) => editor_command(&root.join(file))?,
+            Foreground::Editor(file) => editor_command(root, &root.join(file))?,
         };
         let status = command.status().context("cannot launch command/editor")?;
         ensure!(status.success(), "command exited with {status}");

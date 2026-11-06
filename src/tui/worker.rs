@@ -9,7 +9,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub(super) enum Job {
@@ -21,6 +21,7 @@ pub(super) enum Job {
 }
 pub(super) enum Message {
     Status(Result<Status, String>),
+    Connections(Result<Vec<Value>, String>, Instant),
     Ping(Result<Vec<(String, Option<u64>)>, String>),
     Ip(Result<String, String>),
     Action(Result<String, String>),
@@ -87,7 +88,25 @@ fn result<T>(value: Result<T>) -> Result<T, String> {
 
 pub(super) fn spawn(root: PathBuf) -> (Sender<Job>, Receiver<Message>) {
     let (jobs, rx) = mpsc::channel();
-    let (tx, messages) = mpsc::channel();
+    // Bound queued snapshots while foreground sudo/editor handoffs pause rendering.
+    let (tx, messages) = mpsc::sync_channel(4);
+    // Independent polling: a slow ping/IP lookup must not stall connection updates.
+    let connection_tx = tx.clone();
+    let connection_root = root.clone();
+    std::thread::spawn(move || {
+        loop {
+            let snapshot = result((|| {
+                Controller::for_tray(&Store::load_settings(&connection_root)?)?.connections()
+            })());
+            if connection_tx
+                .send(Message::Connections(snapshot, Instant::now()))
+                .is_err()
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    });
     std::thread::spawn(move || {
         loop {
             if tx.send(Message::Status(result(status(&root)))).is_err() {

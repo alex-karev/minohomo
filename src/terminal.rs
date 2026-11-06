@@ -29,7 +29,7 @@ fn executable(program: &str) -> Option<PathBuf> {
 fn terminal_command(configured: Option<&str>) -> Result<Vec<OsString>> {
     let configured = configured.map(str::trim).filter(|value| !value.is_empty());
     let mut words = if let Some(configured) = configured {
-        shell_words::split(configured).context("invalid quoting in default_terminal")?
+        shell_words::split(configured).context("invalid quoting in default-terminal")?
     } else if executable("xdg-terminal-exec").is_some() {
         vec!["xdg-terminal-exec".into()]
     } else if executable("x-terminal-emulator").is_some() {
@@ -37,11 +37,11 @@ fn terminal_command(configured: Option<&str>) -> Result<Vec<OsString>> {
     } else if let Ok(terminal) = std::env::var("TERMINAL") {
         shell_words::split(&terminal).context("invalid quoting in TERMINAL")?
     } else {
-        bail!("no system default terminal found; set default_terminal in config.yaml");
+        bail!("no system default terminal found; set default-terminal in config.yaml");
     };
     let program = words
         .first()
-        .context("default_terminal must name an executable")?;
+        .context("default-terminal must name an executable")?;
     let path = executable(program).with_context(|| {
         format!("terminal executable '{program}' was not found or is not executable")
     })?;

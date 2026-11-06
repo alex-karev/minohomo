@@ -141,6 +141,22 @@ impl Controller {
             self.secret
         )
     }
+    pub fn connections(&self) -> Result<Vec<Value>> {
+        let response = self.request(Method::GET, self.endpoint(&["connections"])?, None)?;
+        match response.get("connections") {
+            Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(connections)) => {
+                ensure!(
+                    connections.iter().all(|connection| connection["id"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty())),
+                    "Mihomo API returned a connection without an ID"
+                );
+                Ok(connections.clone())
+            }
+            _ => anyhow::bail!("Mihomo API response has an invalid connections list"),
+        }
+    }
     pub fn current_mode(&self) -> Result<String> {
         let config = self.request(Method::GET, self.endpoint(&["configs"])?, None)?;
         config["mode"]

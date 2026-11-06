@@ -22,6 +22,7 @@ ip route show table all
 
 - **Proxy works, TUN times out:** check `tun.enable`, use `stack: gvisor`, and inspect routes and logs. An interface existing does not prove traffic reaches the outbound handler.
 - **TUN connects to some sites but hangs on TLS elsewhere:** check sniffing and destination override. Set `override-destination: true` globally and for HTTP, TLS, and QUIC. Per-protocol values override the global value.
+- **WeChat file transfers or other DIRECT connections stall with an IPv6 remote destination:** set both `mihomo.ipv6` and `mihomo.dns.ipv6` to `false`, apply with `minohomo update --no-sync`, then restart the affected application. Sniffing can replace an application's original IPv4 destination with a hostname that resolves to an unreachable IPv6 endpoint. New profiles disable IPv6 by default; upgrades preserve existing settings.
 - **DIRECT reports a DNS error:** check resolver reachability and bootstrap dependencies. Literal-IP DoH avoids resolving a resolver hostname through an unavailable or intercepted OS DNS path.
 - **Tailscale names fail:** check that Tailscale is running, the resolver uses `#tailscale0`, and the fake-IP filter includes `+.ts.net`.
 - **REALITY authentication fails:** verify the public key, short ID, SNI, fingerprint, and ML-KEM flag against the same source link.
@@ -91,13 +92,13 @@ journalctl --user -u minohomo-tray.service -u minohomo-tray-config.service
 
 The tray remains usable when the core is stopped. Automatic user-service management uses only the default profile. For another profile, run `minohomo --config-dir /absolute/path tray run` in the foreground.
 
-If **Open dashboard** fails, check `default_terminal` and confirm that the terminal emulator is installed. The tray shows launch errors in its menu. Errors after startup appear in the user journal. See [terminal preferences](configuration.md#tray-and-terminal-preferences).
+If **Open dashboard** fails, check `default-terminal` and confirm that the terminal emulator is installed. The tray shows launch errors in its menu. Errors after startup appear in the user journal. See [terminal preferences](configuration.md#tray-and-terminal-preferences).
 
 ## Dashboard or editor problems
 
 The dashboard requires interactive stdin/stdout and a terminal at least 64 columns by 22 rows. Use a CLI subcommand in scripts or redirected sessions.
 
-Editors use `$VISUAL`, then `$EDITOR`, then `sensible-editor`. GUI editors need a wait flag, such as `EDITOR='code --wait'`, so the dashboard resumes after editing. Commands support quoted arguments, not shell pipelines or expansions.
+Editors use a nonempty `default-editor` command from config.yaml, otherwise `$VISUAL`, then `$EDITOR`, then `sensible-editor`. GUI editors need a wait flag, such as `EDITOR='code --wait'`, so the dashboard resumes after editing. Commands support quoted arguments, not shell pipelines or expansions.
 
 ## Geosite validation fails
 

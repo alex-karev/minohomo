@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table, Tabs, Wrap},
 };
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 fn bold() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
@@ -32,6 +32,25 @@ fn clean(text: &str) -> String {
 fn multiline(text: &str) -> String {
     text.lines().map(clean).collect::<Vec<_>>().join("\n")
 }
+fn wrapped_details(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let mut current = String::new();
+        let mut used = 0;
+        for ch in clean(line).chars() {
+            let size = ch.width().unwrap_or(0);
+            if used + size > width && !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+                used = 0;
+            }
+            current.push(ch);
+            used += size;
+        }
+        lines.push(current);
+    }
+    lines
+}
 fn value(text: &str) -> String {
     if text.is_empty() {
         "unknown".into()
@@ -42,7 +61,7 @@ fn value(text: &str) -> String {
 
 pub(super) fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
-    // No fixed RGB or ANSI palette. Inherit the terminal's foreground/background.
+    // Inherit terminal colors, except the requested green/red connection indicators.
     frame.render_widget(
         Block::default().style(Style::default().fg(Color::Reset).bg(Color::Reset)),
         area,
@@ -117,7 +136,7 @@ pub(super) fn draw(frame: &mut Frame, app: &mut App) {
         sections[0],
     );
     frame.render_widget(
-        Tabs::new(["1 Sources", "2 Network", "3 Actions"])
+        Tabs::new(["1 Sources", "2 Network", "3 Connections", "4 Actions"])
             .select(app.tab)
             .highlight_style(selected())
             .divider("  |  "),
@@ -126,6 +145,7 @@ pub(super) fn draw(frame: &mut Frame, app: &mut App) {
     match app.tab {
         0 => sources(frame, app, sections[2]),
         1 => network(frame, app, sections[2]),
+        2 => connections(frame, app, sections[2]),
         _ => actions(frame, app, sections[2]),
     }
     let status_line = if let Some(label) = app.busy {
@@ -141,6 +161,7 @@ pub(super) fn draw(frame: &mut Frame, app: &mut App) {
     let hint = match app.tab {
         0 => "a add  n rename  d remove  u update  U update all",
         1 => "p ping all  i IP/location lookup  Up/Down scroll delays",
+        2 => "Up/Down scroll  Enter details  Ctrl+X copy details",
         _ => "Up/Down select  Enter run  PgUp/PgDn scroll",
     };
     let footer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(sections[3]);
@@ -152,7 +173,7 @@ pub(super) fn draw(frame: &mut Frame, app: &mut App) {
     );
     frame.render_widget(Paragraph::new(hint).style(dim()), footer[1]);
     if let Some(modal) = app.modal.as_mut() {
-        draw_modal(frame, modal);
+        draw_modal(frame, modal, app.connections.error.is_some());
     }
 }
 fn sources(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -256,6 +277,77 @@ fn network(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_symbol("> ");
     frame.render_stateful_widget(table, sections[1], &mut app.ping_state);
 }
+fn connection_status(open: bool) -> Span<'static> {
+    Span::styled(
+        if open { "● Open" } else { "● Closed" },
+        Style::default().fg(if open { Color::Green } else { Color::Red }),
+    )
+}
+fn connections(frame: &mut Frame, app: &mut App, area: Rect) {
+    use super::connections::traffic;
+    let parts = Layout::vertical([Constraint::Length(2), Constraint::Min(3)]).split(area);
+    let open = app.connections.entries.iter().filter(|c| c.open).count();
+    let summary = if let Some(error) = &app.connections.error {
+        format!(
+            "API unavailable: {} | List and status are stale",
+            clean(error)
+        )
+    } else {
+        format!(
+            "{} open / {} closed | Updated: {} | Poll ~1s; history since dashboard start",
+            open,
+            app.connections.entries.len() - open,
+            app.connections
+                .updated
+                .as_deref()
+                .unwrap_or("waiting for API")
+        )
+    };
+    frame.render_widget(Paragraph::new(summary).wrap(Wrap { trim: false }), parts[0]);
+    let wide = area.width >= 100;
+    let rows = app.connections.entries.iter().map(|c| {
+        let mut cells = vec![
+            Cell::from(Line::from(connection_status(c.open))),
+            Cell::from(clean(&c.destination())),
+            Cell::from(clean(&c.chains())),
+            Cell::from(traffic(c.bytes("download") as f64)),
+            Cell::from(traffic(c.bytes("upload") as f64)),
+        ];
+        if wide {
+            cells.insert(
+                2,
+                Cell::from(clean(&format!("{}/{}", c.meta("network"), c.meta("type")))),
+            );
+            cells.push(Cell::from(format!("{}/s", traffic(c.download_speed))));
+            cells.push(Cell::from(format!("{}/s", traffic(c.upload_speed))));
+        }
+        Row::new(cells)
+    });
+    let mut widths = vec![
+        Constraint::Length(8),
+        Constraint::Min(16),
+        Constraint::Length(if wide { 12 } else { 8 }),
+        Constraint::Length(9),
+        Constraint::Length(9),
+    ];
+    let mut header = vec!["Status", "Destination", "Chain", "Download", "Upload"];
+    if wide {
+        widths.insert(2, Constraint::Length(9));
+        header.insert(2, "Net/Type");
+        widths.extend([Constraint::Length(11), Constraint::Length(11)]);
+        header.extend(["DL speed", "UL speed"]);
+    }
+    let table = Table::new(rows, widths)
+        .header(Row::new(header).style(bold()))
+        .block(block(if app.connections.entries.is_empty() {
+            " Connections | Waiting for observed traffic "
+        } else {
+            " Connections | Newest first | Last 1000 closed retained "
+        }))
+        .row_highlight_style(selected())
+        .highlight_symbol("> ");
+    frame.render_stateful_widget(table, parts[1], &mut app.connection_state);
+}
 fn actions(frame: &mut Frame, app: &mut App, area: Rect) {
     let sections =
         Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)]).split(area);
@@ -300,8 +392,35 @@ fn input(frame: &mut Frame, area: Rect, label: &str, input: &Input, focused: boo
         ));
     }
 }
-fn draw_modal(frame: &mut Frame, modal: &mut Modal) {
+fn draw_modal(frame: &mut Frame, modal: &mut Modal, connections_stale: bool) {
     match modal {
+        Modal::Connection { connection, scroll } => {
+            let area = centered(frame.area(), 100, frame.area().height.saturating_sub(2));
+            frame.render_widget(Clear, area);
+            let title = Line::from(vec![
+                Span::raw(if connections_stale {
+                    " Connection details (STALE) | "
+                } else {
+                    " Connection details | "
+                }),
+                connection_status(connection.open),
+                Span::raw(" | Ctrl+X copy | Esc close "),
+            ]);
+            // Preserve newlines but strip all controls received from the API.
+            let lines =
+                wrapped_details(&connection.details(), area.width.saturating_sub(2) as usize);
+            let max_scroll = lines
+                .len()
+                .saturating_sub(area.height.saturating_sub(2) as usize)
+                .min(u16::MAX as usize) as u16;
+            *scroll = (*scroll).min(max_scroll);
+            frame.render_widget(
+                Paragraph::new(lines.join("\n"))
+                    .scroll((*scroll, 0))
+                    .block(block(title)),
+                area,
+            );
+        }
         Modal::Add(form) => {
             let area = centered(frame.area(), 88, 17);
             frame.render_widget(Clear, area);
@@ -433,7 +552,7 @@ Apply cached sources to update generated subscription names.",
             frame.render_widget(
                 Paragraph::new(vec![
                     Line::styled("Navigation", bold()),
-                    Line::from("1/2/3 or Tab: panel | Up/Down or j/k: select | PgUp/PgDn: page"),
+                    Line::from("1/2/3/4 or Tab: panel | Up/Down or j/k: select | PgUp/PgDn: page"),
                     Line::from("Enter: run action | q / Ctrl-C: quit | Esc: cancel dialog"),
                     Line::default(),
                     Line::styled("Sources + configuration", bold()),
@@ -444,6 +563,8 @@ Apply cached sources to update generated subscription names.",
                     Line::styled("Mihomo + network", bold()),
                     Line::from("m mode | x proxy | s start/stop/restart | t toggle tray"),
                     Line::from("p ping all proxies | i IP/location via ipwho.is | F5 refresh"),
+                    Line::from("Connections: Enter details | Ctrl+X copy via terminal OSC 52"),
+                    Line::from("Green open / red closed. History starts with this dashboard."),
                     Line::default(),
                     Line::from("Updates and service control hand off to your terminal for sudo."),
                     Line::from("Runtime mode/proxy changes use the API. Config edits need Apply."),
@@ -475,7 +596,7 @@ mod tests {
         let mut app = App::test_app();
         for (width, height) in [(100, 32), (64, 22), (30, 8)] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            for tab in 0..3 {
+            for tab in 0..4 {
                 app.tab = tab;
                 terminal.draw(|frame| draw(frame, &mut app)).unwrap();
             }

@@ -12,23 +12,26 @@ minohomo
 minohomo --config-dir /absolute/path
 ```
 
-The **Minohomo** application-menu shortcut opens a new terminal using the same launcher as the tray. Run `minohomo --window` to do this from the CLI. Both respect `default_terminal` in `config.yaml`; the launcher works without the tray running.
+The **Minohomo** application-menu shortcut opens a new terminal using the same launcher as the tray. Run `minohomo --window` to do this from the CLI. Both respect `default-terminal` in `config.yaml`; the launcher works without the tray running.
 
 Run it as your normal user in an interactive terminal. When stdin or stdout is not a terminal, the dashboard exits with a message instead of emitting terminal control codes.
 
-The layout has three panels:
+The layout has four panels:
 
 - **Sources:** saved subscriptions and independent proxies, cached node counts, last update times. Add a URL/link, optionally name it, remove a selected source, or update one/all sources. Source links and credentials stay hidden outside the add dialog.
 - **Network:** proxy delay tests, sorted fastest first, plus an on-demand public IP and approximate location lookup.
-- **Actions:** every operation in one browsable list, including applying cached sources, core updates, geosite download with/without reload, editor shortcuts, tray preference, and system service controls.
+- **Connections (3):** automatically updated connections, newest first, with green **Open** and red **Closed** indicators. Shows destination, transport/inbound type, chain, download/upload totals, and speeds on wider terminals. Enter opens scrollable details including rule, DNS mode, sniffed host, source/destination addresses, inbound fields, and process data when Mihomo supplies them.
+- **Actions (4):** every operation in one browsable list, including applying cached sources, core updates, geosite download with/without reload, editor shortcuts, tray preference, and system service controls.
 
 The header shows the system Mihomo service state, running mode, selected proxy, installed core version, saved tray preference, geosite file size, and config/rules editor shortcuts. It refreshes every few seconds. An unavailable API does not prevent source management, editing, or service control.
 
 | Key | Action |
 | --- | --- |
-| `Tab`, `Shift-Tab`, `1`/`2`/`3` | Switch panels |
+| `Tab`, `Shift-Tab`, `1`/`2`/`3`/`4` | Switch panels |
 | `Up`/`Down`, `j`/`k`, `PgUp`/`PgDn`, `Home`/`End` | Navigate the active list |
 | `Enter` in Actions | Run selected action |
+| `Enter` in Connections | Open selected connection details; Enter or Esc closes them |
+| `Ctrl-X` in Connections or connection details | Copy connection details through terminal clipboard support (OSC 52) |
 | `a`, `d` | Add or remove a source |
 | `n` in Sources | Rename the selected source |
 | `u`, `U` | Update selected source or all sources |
@@ -45,13 +48,17 @@ The header shows the system Mihomo service state, running mode, selected proxy, 
 
 In the add form, `Tab` moves between the name, link, and HTTP(S)-proxy checkbox. Paste a subscription URL or direct proxy link. Use the checkbox only when an HTTP(S) link describes a proxy endpoint rather than a subscription. `Space` toggles it, `Ctrl-U` clears a text field, and `Enter` saves. Deletion, stop, and restart ask for confirmation; only `y` confirms, while `Enter` cancels.
 
-Editors use `$VISUAL`, then `$EDITOR`, then Debian's `sensible-editor`. Editor arguments and quoted paths work without a shell. For GUI editors, configure a wait flag, for example `EDITOR='code --wait'`, so the dashboard resumes after editing. Closing the editor returns directly to the dashboard. Apply cached sources from Actions to deploy config/rule edits without fetching subscriptions.
+Editors use `default-editor` from config.yaml when nonempty, otherwise `$VISUAL`, then `$EDITOR`, then Debian's `sensible-editor`. Editor arguments and quoted paths work without a shell. For GUI editors, configure a wait flag, for example `EDITOR='code --wait'`, so the dashboard resumes after editing. Closing the editor returns directly to the dashboard. Apply cached sources from Actions to deploy config/rule edits without fetching subscriptions.
 
 Status, ping, mode/proxy changes, and IP lookups run in a background worker. While a network action runs, you can browse panels or quit. Updates, geosite downloads, tray changes, and service commands temporarily restore the normal terminal, run the existing CLI, and show its output. Sudo can prompt there. Press Enter afterward to return. The dashboard does not hold the source-cache lock between actions, so another CLI process can work on the same profile.
 
 Public IP lookup contacts **https://ipwho.is/** only when requested. The provider sees the request's outbound IP. The result includes the IP, approximate location, ISP, and lookup time. It follows system routing, TUN, and proxy environment settings; it does not prove that Mihomo carried the request. Failed/rate-limited requests show an error without discarding the last successful result. No lookup runs automatically at startup.
 
-The dashboard inherits the terminal's foreground/background colors. Selection uses reverse video; headings use bold/dim text. No hardcoded light/dark palette or color-detection request. Minimum size is 64 columns by 22 rows. The UI restores the terminal on normal exit, errors, and panics.
+Connections poll the authenticated Mihomo API in a separate background worker, roughly once per second plus request time. Updates continue during ping and IP lookups and while viewing details. Selection follows connection IDs as new entries arrive. History exists only in memory for this dashboard session; all observed open connections and up to 1000 recently started closed connections are retained. Mihomo does not provide past closed connections through this endpoint. Connections that open and close between polls can be missed. Closed totals are the last observed values, not guaranteed final totals; speeds are calculated from counter differences between polls. API failures leave the last known list/status intact and show a stale warning rather than falsely marking connections closed.
+
+Ctrl-X sends details using OSC 52. Clipboard access must be supported and permitted by the terminal and any terminal multiplexer. The application cannot confirm that the terminal accepted the copy. Connection details include browsing destinations, addresses, process paths, and inbound usernames; review them before sharing.
+
+The dashboard inherits the terminal's foreground/background colors, except for green/red connection status indicators. Selection uses reverse video; headings use bold/dim text. No hardcoded light/dark background palette or color-detection request. Minimum size is 64 columns by 22 rows. The UI restores the terminal on normal exit, errors, and panics.
 
 ## Commands
 
@@ -82,7 +89,7 @@ sudo minohomo apply --config PATH [--geosite PATH]
 
 | Command | Behavior |
 | --- | --- |
-| `--window` | Opens the dashboard in a new terminal using `default_terminal` or the system default. Used by the application-menu shortcut. |
+| `--window` | Opens the dashboard in a new terminal using `default-terminal` or the system default. Used by the application-menu shortcut. |
 | `init` | Creates missing config files without overwriting existing ones. Other application commands also initialize missing files. |
 | `add` | Validates and saves links. Does not fetch subscriptions or reload Mihomo. HTTP(S) URLs mean subscriptions unless `--proxy` is supplied. |
 | `list` | Shows unique source names, links, last successful update times in UTC, and cached proxy counts. |
@@ -207,14 +214,14 @@ The tray shows Mihomo's running/stopped state, current mode, and selected proxy.
 The **Open dashboard** menu item launches the same profile's TUI in a new terminal. Set the top-level terminal preference in `config.yaml`:
 
 ```yaml
-default_terminal: null             # System default
-# default_terminal: "kitty"
-# default_terminal: "gnome-terminal"
-# default_terminal: "konsole --separate"
-# default_terminal: "alacritty"
+default-terminal: null             # System default
+# default-terminal: "kitty"
+# default-terminal: "gnome-terminal"
+# default-terminal: "konsole --separate"
+# default-terminal: "alacritty"
 ```
 
-Unset, null, or empty uses `xdg-terminal-exec` when available, then Debian's `x-terminal-emulator` alternative, then `$TERMINAL` as a fallback. Custom commands support quoted paths and arguments without a shell. The launcher supplies the emulator's execution flag; a custom command can include an explicit trailing `--`, `-e`, `-x`, or `--execute` flag to override it. The tray reads this setting on each click. `default-terminal` is also accepted as an alias.
+Unset, null, or empty uses `xdg-terminal-exec` when available, then Debian's `x-terminal-emulator` alternative, then `$TERMINAL` as a fallback. Custom commands support quoted paths and arguments without a shell. The launcher supplies the emulator's execution flag; a custom command can include an explicit trailing `--`, `-e`, `-x`, or `--execute` flag to override it. The tray reads this setting on each click.
 
 The terminal starts in its own transient systemd user service, so disabling the tray does not close the dashboard. Launch failures appear in the tray's error entry; errors after terminal startup appear in the user journal. This requires a working systemd user manager and an installed terminal emulator.
 
